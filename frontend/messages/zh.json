@@ -517,6 +517,13 @@
       "website": "站点",
       "endpoint": "URL"
     },
+    "orgScope": {
+      "label": "组织范围",
+      "unbound": "未绑定目标",
+      "all": "全部组织",
+      "more": "还有更多组织未列出",
+      "loading": "正在加载组织…"
+    },
     "fields": {
       "host": "主机名",
       "url": "URL 地址",
@@ -553,6 +560,7 @@
         "responseHeaders": "响应头包含",
         "organizationContains": "组织名称包含",
         "organizationExact": "组织名称精确匹配",
+        "organizationUnbound": "未绑定组织",
         "statusErrorExact": "错误状态码精确匹配",
         "hostStatus": "API 主机成功响应",
         "hostTech": "主机与技术指纹",
@@ -572,6 +580,7 @@
         "responseHeaders": "查找已存响应头中包含 rememberMe=deleteMe 的资产",
         "organizationContains": "查找当前关联组织名称中包含 Tencent 的资产",
         "organizationExact": "精确匹配组织显示名称 Tencent",
+        "organizationUnbound": "查找当前未绑定任何组织的资产",
         "statusErrorExact": "只匹配 HTTP 404 响应",
         "hostStatus": "同时限定主机名和成功状态",
         "hostTech": "同时限定主机名和技术指纹",
@@ -615,6 +624,7 @@
       "invalidConnector": { "message": "条件之间的连接符不正确。", "fix": "同时满足用 && 或 and，满足任一条件用 || 或 or。同一条查询不能混用。" },
       "missingCondition": { "message": "连接符后缺少条件。", "fix": "在 &&、and、|| 或 or 后补充完整的字段条件。" },
       "tooManyConditions": { "message": "条件数量超过限制。", "fix": "将查询减少到 10 条条件以内。" },
+      "scopeNotCombinable": { "message": "该查询使用“或”连接，无法再叠加组织范围。", "fix": "请改用 && 连接条件，或将组织范围切换为“全部组织”。" },
       "unknown": { "message": "查询无法解析。", "fix": "按照语法手册使用支持的字段、运算符和双引号值。" }
     },
     "table": {

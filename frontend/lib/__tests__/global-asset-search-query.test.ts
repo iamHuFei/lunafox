@@ -3,7 +3,10 @@ import {
   GLOBAL_ASSET_SEARCH_FEATURED_GUIDANCE,
   GLOBAL_ASSET_SEARCH_GUIDANCE,
   GLOBAL_ASSET_SEARCH_DEFAULT_PAGE_SIZE,
+  composeGlobalAssetSearchQuery,
+  decomposeGlobalAssetSearchQuery,
   getGlobalAssetSearchDiagnosticCode,
+  GlobalAssetSearchOrgScope,
   GlobalAssetSearchQueryError,
   globalAssetSearchQueryFingerprint,
   normalizeGlobalAssetSearchPageSize,
@@ -216,6 +219,7 @@ describe("global asset search query", () => {
       'organization="腾讯"',
       'host="api" && statusCode=="200"',
     ])
+    expect(GLOBAL_ASSET_SEARCH_GUIDANCE.some((entry) => entry.query === 'organization==""')).toBe(true)
   })
 
   it("assigns stable diagnostic codes and hides unknown parser details", () => {
@@ -262,5 +266,174 @@ describe("global asset search query", () => {
     expect(globalAssetSearchQueryFingerprint(left, "website", 10)).toBe(
       globalAssetSearchQueryFingerprint(right, "website", 10)
     )
+  })
+})
+
+describe("composeGlobalAssetSearchQuery", () => {
+  const unbound: GlobalAssetSearchOrgScope = { mode: "unbound" }
+  const all: GlobalAssetSearchOrgScope = { mode: "all" }
+  const acme: GlobalAssetSearchOrgScope = { mode: "organization", name: "Acme" }
+
+  it("auto-searches the unbound condition for empty text", () => {
+    expect(composeGlobalAssetSearchQuery("", unbound)).toEqual({ status: "query", query: 'organization==""', takeover: false })
+    expect(composeGlobalAssetSearchQuery("   ", unbound)).toEqual({ status: "query", query: 'organization==""', takeover: false })
+  })
+
+  it("auto-searches a known organization for empty text", () => {
+    expect(composeGlobalAssetSearchQuery("", acme)).toEqual({ status: "query", query: 'organization=="Acme"', takeover: false })
+  })
+
+  it("returns none for empty text under the all scope", () => {
+    expect(composeGlobalAssetSearchQuery("", all)).toEqual({ status: "none" })
+    expect(composeGlobalAssetSearchQuery("draft", all)).toEqual({ status: "query", query: "draft", takeover: false })
+  })
+
+  it("rewrites plain text as a URL contains condition", () => {
+    expect(composeGlobalAssetSearchQuery("admin", unbound)).toEqual({
+      status: "query",
+      query: 'url="admin" && organization==""',
+      takeover: false,
+    })
+    expect(composeGlobalAssetSearchQuery("https://example.test/login", acme)).toEqual({
+      status: "query",
+      query: 'url="https://example.test/login" && organization=="Acme"',
+      takeover: false,
+    })
+  })
+
+  it("appends the scope while preserving and-word drafts", () => {
+    expect(composeGlobalAssetSearchQuery('url="ab" and host="cd"', unbound)).toEqual({
+      status: "query",
+      query: 'url="ab" && host="cd" && organization==""',
+      takeover: false,
+    })
+  })
+
+  it("escapes quotes in organization names and round-trips through the parser", () => {
+    const quoted: GlobalAssetSearchOrgScope = { mode: "organization", name: 'A"B' }
+    const composed = composeGlobalAssetSearchQuery('host="api"', quoted)
+    expect(composed).toEqual({ status: "query", query: 'host="api" && organization=="A\\"B"', takeover: false })
+    const parsed = parseGlobalAssetSearchQuery((composed as { query: string }).query)
+    expect(parsed.mode === "structured" && parsed.conditions[1]!.value).toBe('A"B')
+  })
+
+  it("is idempotent when the draft already carries the scope condition", () => {
+    expect(composeGlobalAssetSearchQuery('host="api" && organization==""', unbound)).toEqual({
+      status: "query",
+      query: 'host="api" && organization==""',
+      takeover: false,
+    })
+    expect(composeGlobalAssetSearchQuery('organization==""', unbound)).toEqual({
+      status: "query",
+      query: 'organization==""',
+      takeover: false,
+    })
+    expect(composeGlobalAssetSearchQuery('organization=="Acme" && host="api"', acme)).toEqual({
+      status: "query",
+      query: 'organization=="Acme" && host="api"',
+      takeover: false,
+    })
+  })
+
+  it("lets a draft organization condition take over the scope", () => {
+    expect(composeGlobalAssetSearchQuery('organization="Acme"', unbound)).toEqual({
+      status: "query",
+      query: 'organization="Acme"',
+      takeover: true,
+    })
+    expect(composeGlobalAssetSearchQuery('organization=="Other"', acme)).toEqual({
+      status: "query",
+      query: 'organization=="Other"',
+      takeover: true,
+    })
+  })
+
+  it("rejects an or-draft under a scoped picker with scopeNotCombinable", () => {
+    try {
+      composeGlobalAssetSearchQuery('url="ab" || host="cd"', unbound)
+      throw new Error("expected or-draft to fail")
+    } catch (error) {
+      expect(getGlobalAssetSearchDiagnosticCode(error)).toBe("scopeNotCombinable")
+    }
+  })
+
+  it("surfaces the ten-condition cap as tooManyConditions", () => {
+    const tenConditions = Array.from({ length: 10 }, () => 'tech="nginx"').join(" && ")
+    try {
+      composeGlobalAssetSearchQuery(tenConditions, unbound)
+      throw new Error("expected ten-condition draft to fail")
+    } catch (error) {
+      expect(getGlobalAssetSearchDiagnosticCode(error)).toBe("tooManyConditions")
+    }
+  })
+})
+
+describe("decomposeGlobalAssetSearchQuery", () => {
+  const known = ["Acme", 'A"B', "腾讯"]
+
+  it("defaults to unbound for an empty query", () => {
+    expect(decomposeGlobalAssetSearchQuery("", known)).toEqual({ scope: { mode: "unbound" }, text: "" })
+    expect(decomposeGlobalAssetSearchQuery("  ", known)).toEqual({ scope: { mode: "unbound" }, text: "" })
+  })
+
+  it("splits a pure unbound condition", () => {
+    expect(decomposeGlobalAssetSearchQuery('organization==""', known)).toEqual({ scope: { mode: "unbound" }, text: "" })
+  })
+
+  it("splits a scoped draft with remaining conditions", () => {
+    expect(decomposeGlobalAssetSearchQuery('host="api" && organization==""', known)).toEqual({
+      scope: { mode: "unbound" },
+      text: 'host="api"',
+    })
+  })
+
+  it("recognizes a known organization name including quoted names", () => {
+    expect(decomposeGlobalAssetSearchQuery('organization=="Acme" && host="api"', known)).toEqual({
+      scope: { mode: "organization", name: "Acme" },
+      text: 'host="api"',
+    })
+    expect(decomposeGlobalAssetSearchQuery('organization=="A\\"B"', known)).toEqual({
+      scope: { mode: "organization", name: 'A"B' },
+      text: "",
+    })
+  })
+
+  it("keeps unknown organization names as an all-scope verbatim draft", () => {
+    expect(decomposeGlobalAssetSearchQuery('organization=="Ghost" && host="api"', known)).toEqual({
+      scope: { mode: "all" },
+      text: 'organization=="Ghost" && host="api"',
+    })
+  })
+
+  it("keeps two organization conditions verbatim", () => {
+    const raw = 'organization=="Acme" && organization=="腾讯"'
+    expect(decomposeGlobalAssetSearchQuery(raw, known)).toEqual({ scope: { mode: "all" }, text: raw })
+  })
+
+  it("keeps contains-operator and or-combinator queries verbatim", () => {
+    expect(decomposeGlobalAssetSearchQuery('organization="Acme"', known)).toEqual({ scope: { mode: "all" }, text: 'organization="Acme"' })
+    const or = 'url="ab" || host="cd"'
+    expect(decomposeGlobalAssetSearchQuery(or, known)).toEqual({ scope: { mode: "all" }, text: or })
+  })
+
+  it("keeps plain URL and invalid queries verbatim", () => {
+    expect(decomposeGlobalAssetSearchQuery("https://example.test", known)).toEqual({ scope: { mode: "all" }, text: "https://example.test" })
+    expect(decomposeGlobalAssetSearchQuery('url="a', known)).toEqual({ scope: { mode: "all" }, text: 'url="a' })
+  })
+
+  it("round-trips compose output through decompose", () => {
+    const scopes: GlobalAssetSearchOrgScope[] = [
+      { mode: "unbound" },
+      { mode: "organization", name: "Acme" },
+      { mode: "organization", name: 'A"B' },
+    ]
+    const drafts = ["", 'host="api"', 'url="ab" && title=="Login"', "plain-admin"]
+    for (const scope of scopes) {
+      for (const draft of drafts) {
+        const composed = composeGlobalAssetSearchQuery(draft, scope)
+        if (composed.status !== "query" || composed.takeover) continue
+        expect(decomposeGlobalAssetSearchQuery(composed.query, known)).toEqual({ scope, text: draft.trim() === "plain-admin" ? 'url="plain-admin"' : draft.trim() })
+      }
+    }
   })
 })

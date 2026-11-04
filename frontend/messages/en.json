@@ -517,6 +517,13 @@
       "website": "Website",
       "endpoint": "Endpoint"
     },
+    "orgScope": {
+      "label": "Organization scope",
+      "unbound": "Unassigned targets",
+      "all": "All organizations",
+      "more": "More organizations are not listed",
+      "loading": "Loading organizations…"
+    },
     "fields": {
       "host": "Hostname",
       "url": "URL address",
@@ -553,6 +560,7 @@
         "responseHeaders": "Response headers contain",
         "organizationContains": "Organization contains",
         "organizationExact": "Exact organization",
+        "organizationUnbound": "No organization",
         "statusErrorExact": "Exact error status",
         "hostStatus": "API host success",
         "hostTech": "Host and technology",
@@ -572,6 +580,7 @@
         "responseHeaders": "Find assets whose stored response headers contain rememberMe=deleteMe",
         "organizationContains": "Find assets whose current organization name contains Tencent",
         "organizationExact": "Match the organization display name exactly as Tencent",
+        "organizationUnbound": "Find assets not linked to any organization",
         "statusErrorExact": "Match only HTTP 404 responses",
         "hostStatus": "Require both the host and a successful status",
         "hostTech": "Require both the host and technology",
@@ -615,6 +624,7 @@
       "invalidConnector": { "message": "The condition connector is not valid.", "fix": "Use && or the word and for match-all, or || or the word or for match-any. Do not mix them in one query." },
       "missingCondition": { "message": "A condition is missing after the connector.", "fix": "Add a complete field condition after &&, and, ||, or or." },
       "tooManyConditions": { "message": "The query has too many conditions.", "fix": "Reduce it to 10 conditions or fewer." },
+      "scopeNotCombinable": { "message": "This query uses OR connectors, so an organization scope cannot be added.", "fix": "Join conditions with && instead, or switch the organization scope to All organizations." },
       "unknown": { "message": "The query could not be parsed.", "fix": "Use the supported fields, operators, and double-quoted values from the syntax guide." }
     },
     "table": {

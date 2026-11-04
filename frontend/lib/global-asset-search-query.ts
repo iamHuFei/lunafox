@@ -29,6 +29,7 @@ export type GlobalAssetSearchDiagnosticCode =
   | "invalidConnector"
   | "missingCondition"
   | "tooManyConditions"
+  | "scopeNotCombinable"
   | "unknown"
 
 export const GLOBAL_ASSET_SEARCH_FIELDS = ["url", "host", "title", "statusCode", "tech", "hasScreenshot", "responseHeaders", "organization"] as const satisfies readonly GlobalAssetSearchField[]
@@ -102,6 +103,7 @@ const GLOBAL_ASSET_SEARCH_DIAGNOSTIC_CODES = new Set<GlobalAssetSearchDiagnostic
   "invalidConnector",
   "missingCondition",
   "tooManyConditions",
+  "scopeNotCombinable",
   "unknown",
 ])
 
@@ -132,6 +134,7 @@ const RAW_GLOBAL_ASSET_SEARCH_GUIDANCE: readonly GlobalAssetSearchGuidanceEntry[
   { id: "response-headers-contains", category: "basics", query: 'responseHeaders="rememberMe=deleteMe"', labelKey: "syntax.exampleLabels.responseHeaders", descriptionKey: "syntax.exampleDescriptions.responseHeaders" },
   { id: "organization-contains", category: "basics", query: 'organization="腾讯"', labelKey: "syntax.exampleLabels.organizationContains", descriptionKey: "syntax.exampleDescriptions.organizationContains", featured: true },
   { id: "organization-exact", category: "basics", query: 'organization=="Tencent"', labelKey: "syntax.exampleLabels.organizationExact", descriptionKey: "syntax.exampleDescriptions.organizationExact" },
+  { id: "organization-unbound", category: "basics", query: 'organization==""', labelKey: "syntax.exampleLabels.organizationUnbound", descriptionKey: "syntax.exampleDescriptions.organizationUnbound" },
   { id: "url-exact", category: "basics", query: 'url=="https://example.com"', labelKey: "syntax.exampleLabels.urlExact", descriptionKey: "syntax.exampleDescriptions.urlExact" },
   { id: "title-exact", category: "basics", query: 'title=="Admin Login"', labelKey: "syntax.exampleLabels.titleExact", descriptionKey: "syntax.exampleDescriptions.titleExact" },
   { id: "status-exact-404", category: "basics", query: 'statusCode="404"', labelKey: "syntax.exampleLabels.statusExact", descriptionKey: "syntax.exampleDescriptions.statusErrorExact" },
@@ -192,6 +195,120 @@ export function globalAssetSearchQueryFingerprint(query: GlobalAssetSearchQuery,
       .sort()
       .join(query.combinator === "or" ? "||" : "&&")}`
   return `${assetType}:${pageSize}:${canonical}`
+}
+
+/**
+ * Organization scope applied by the search page picker. `unbound` selects
+ * targets that are linked to no active organization (`organization==""`),
+ * `organization` scopes searches to one organization by display name, and
+ * `all` leaves the query untouched.
+ */
+export type GlobalAssetSearchOrgScope =
+  | { mode: "unbound" }
+  | { mode: "all" }
+  | { mode: "organization"; name: string }
+
+export type ComposedGlobalAssetSearchQuery =
+  | { status: "none" }
+  | { status: "query"; query: string; takeover: boolean }
+
+export function formatGlobalAssetSearchCondition(condition: GlobalAssetSearchCondition): string {
+  return `${condition.field}${condition.operator}${JSON.stringify(String(condition.value))}`
+}
+
+function globalAssetSearchOrgCondition(scope: GlobalAssetSearchOrgScope): string {
+  if (scope.mode === "unbound") {
+    return 'organization==""'
+  }
+  if (scope.mode === "organization") {
+    return `organization==${JSON.stringify(scope.name)}`
+  }
+  return ""
+}
+
+/**
+ * Merge the draft text with the picker scope into the submitted query. The
+ * scope always rides inside `q` so page tokens, exports, and shared links
+ * keep working without any new API surface. A draft that already carries its
+ * own organization condition wins (`takeover`); the caller then resets the
+ * picker to `all` instead of silently re-scoping the user's query.
+ */
+export function composeGlobalAssetSearchQuery(text: string, scope: GlobalAssetSearchOrgScope): ComposedGlobalAssetSearchQuery {
+  const trimmed = text.trim()
+  const scopeCondition = globalAssetSearchOrgCondition(scope)
+  if (!scopeCondition) {
+    return trimmed ? { status: "query", query: trimmed, takeover: false } : { status: "none" }
+  }
+  if (!trimmed) {
+    return { status: "query", query: scopeCondition, takeover: false }
+  }
+
+  const parsed = parseGlobalAssetSearchQuery(trimmed)
+  const orgConditions = parsed.mode === "structured"
+    ? parsed.conditions.filter((condition) => condition.field === "organization")
+    : []
+  if (orgConditions.length > 0) {
+    const carriesScope = orgConditions.some(
+      (condition) => formatGlobalAssetSearchCondition(condition) === scopeCondition
+    )
+    // Re-submitting an already scoped query (asset type or page size change)
+    // must stay idempotent instead of appending the scope twice.
+    return { status: "query", query: trimmed, takeover: !carriesScope }
+  }
+  if (parsed.mode === "structured" && parsed.combinator === "or") {
+    // The flat DSL cannot express (A || B) && scope; appending the scope would
+    // either fail to parse or silently widen the filter, so reject up front.
+    throw new GlobalAssetSearchQueryError(
+      "organization scope cannot be combined with || connectors",
+      "scopeNotCombinable"
+    )
+  }
+  const draftConditions = parsed.mode === "plainUrl"
+    ? `url=${JSON.stringify(parsed.value)}`
+    : parsed.conditions.map(formatGlobalAssetSearchCondition).join(" && ")
+  const composed = `${draftConditions} && ${scopeCondition}`
+  // Re-parse so byte limits and the ten-condition cap surface their own
+  // diagnostics instead of a malformed submission.
+  parseGlobalAssetSearchQuery(composed)
+  return { status: "query", query: composed, takeover: false }
+}
+
+/**
+ * Split a submitted query back into picker scope plus draft text. Unknown or
+ * ambiguous queries (or-combinators, contains matches, unknown names) stay
+ * verbatim under the `all` scope so shared links never lose information.
+ */
+export function decomposeGlobalAssetSearchQuery(
+  raw: string,
+  knownOrgNames: readonly string[]
+): { scope: GlobalAssetSearchOrgScope; text: string } {
+  if (!raw.trim()) {
+    return { scope: { mode: "unbound" }, text: "" }
+  }
+  let parsed: GlobalAssetSearchQuery
+  try {
+    parsed = parseGlobalAssetSearchQuery(raw)
+  } catch {
+    return { scope: { mode: "all" }, text: raw }
+  }
+  if (parsed.mode !== "structured" || parsed.combinator === "or") {
+    return { scope: { mode: "all" }, text: raw }
+  }
+  const orgExact = parsed.conditions.filter(
+    (condition) => condition.field === "organization" && condition.operator === "=="
+  )
+  if (orgExact.length !== 1) {
+    return { scope: { mode: "all" }, text: raw }
+  }
+  const name = String(orgExact[0]!.value)
+  if (name !== "" && !knownOrgNames.includes(name)) {
+    return { scope: { mode: "all" }, text: raw }
+  }
+  const remaining = parsed.conditions.filter((condition) => condition !== orgExact[0])
+  return {
+    scope: name === "" ? { mode: "unbound" } : { mode: "organization", name },
+    text: remaining.map(formatGlobalAssetSearchCondition).join(" && "),
+  }
 }
 
 function looksStructured(query: string): boolean {
