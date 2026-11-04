@@ -82,3 +82,44 @@ func TestGlobalAssetExportSnapshotAppliesCurrentOrganizationPredicate(t *testing
 		t.Fatalf("organization export rows = %+v, want only current Tencent relation", got)
 	}
 }
+
+func TestGlobalAssetExportSnapshotAppliesUnboundOrganizationPredicate(t *testing.T) {
+	db := newAssetRepositoryDB(t)
+	now := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
+	if err := db.Create(&model.AssetTargetRef{ID: 2, Name: "ghost-linked.example", Type: assetdomain.TargetTypeDomain}).Error; err != nil {
+		t.Fatalf("seed ghost target: %v", err)
+	}
+	// Target 2 is linked only to a soft-deleted organization whose stale
+	// organization_target rows must not keep its assets out of the unbound
+	// export, so both websites below belong to the unbound set.
+	if err := db.Exec(`INSERT INTO organization (id, name, deleted_at) VALUES (1, 'Ghost', '2026-10-13 08:00:00')`).Error; err != nil {
+		t.Fatalf("seed organizations: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO organization_target (organization_id, target_id) VALUES (1, 2)`).Error; err != nil {
+		t.Fatalf("seed organization target: %v", err)
+	}
+	if err := db.Create([]model.Website{
+		{ID: 31, TargetID: 1, URL: "https://unbound.example.test", Host: "unbound.example.test", CreatedAt: now, Tech: pq.StringArray{}},
+		{ID: 32, TargetID: 2, URL: "https://ghost.example.test", Host: "ghost.example.test", CreatedAt: now.Add(-time.Second), Tech: pq.StringArray{}},
+	}).Error; err != nil {
+		t.Fatalf("seed websites: %v", err)
+	}
+	ast, err := assetapp.ParseGlobalAssetSearchQuery(`organization==""`)
+	if err != nil {
+		t.Fatalf("parse unbound export query: %v", err)
+	}
+
+	var got []assetdomain.Website
+	err = NewGlobalAssetExportSnapshotStore(db).WithSnapshot(context.Background(), ast, assetapp.GlobalAssetSearchAssetTypeWebsite, func(snapshot assetapp.GlobalAssetExportSnapshot) error {
+		return snapshot.ForEachWebsite(context.Background(), func(item assetdomain.Website) error {
+			got = append(got, item)
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("read unbound export snapshot: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != 31 || got[1].ID != 32 {
+		t.Fatalf("unbound export rows = %+v, want assets of targets without active organizations", got)
+	}
+}

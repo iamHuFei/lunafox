@@ -250,6 +250,34 @@ func TestParseGlobalAssetSearchQuerySupportsOrganizationNameSemantics(t *testing
 	}
 }
 
+func TestParseGlobalAssetSearchQuerySupportsUnboundOrganizationSemantics(t *testing.T) {
+	unbound, err := ParseGlobalAssetSearchQuery(`organization==""`)
+	if err != nil {
+		t.Fatalf("unbound organization query should be accepted: %v", err)
+	}
+	if len(unbound.Conditions) != 1 {
+		t.Fatalf("unbound organization query must parse into one condition: %+v", unbound)
+	}
+	condition := unbound.Conditions[0]
+	if condition.Field != GlobalAssetSearchFieldOrganization || condition.Operator != GlobalAssetSearchOperatorExact || condition.Text != "" {
+		t.Fatalf("unexpected unbound organization condition: %+v", condition)
+	}
+
+	combined, err := ParseGlobalAssetSearchQuery(`organization=="" && host="api"`)
+	if err != nil {
+		t.Fatalf("unbound organization condition should compose with flat AND conditions: %v", err)
+	}
+	if len(combined.Conditions) != 2 {
+		t.Fatalf("unbound organization query must compose into two conditions: %+v", combined.Conditions)
+	}
+
+	// The contains form stays subject to the shared two-rune minimum, so the
+	// empty unbound selector is only expressible through the exact operator.
+	if _, err := ParseGlobalAssetSearchQuery(`organization=""`); !errors.Is(err, ErrInvalidGlobalAssetSearchQuery) {
+		t.Fatalf("empty organization contains query should be rejected: %v", err)
+	}
+}
+
 func TestParseGlobalAssetSearchQuerySupportsHasScreenshotBoolean(t *testing.T) {
 	for _, raw := range []string{`hasScreenshot="true"`, `hasScreenshot=="true"`} {
 		ast, err := ParseGlobalAssetSearchQuery(raw)

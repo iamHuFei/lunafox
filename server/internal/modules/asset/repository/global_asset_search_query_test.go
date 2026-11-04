@@ -112,6 +112,60 @@ func TestGlobalAssetSearchRepositoryFiltersByCurrentOrganizationsWithoutDuplicat
 	}
 }
 
+func TestGlobalAssetSearchRepositoryFiltersUnboundTargetsExcludingSoftDeletedOrganizations(t *testing.T) {
+	db := newAssetRepositoryDB(t)
+	now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
+	if err := db.Create([]model.AssetTargetRef{
+		{ID: 2, Name: "ghost-linked.example", Type: assetdomain.TargetTypeDomain},
+		{ID: 3, Name: "unbound.example", Type: assetdomain.TargetTypeDomain},
+	}).Error; err != nil {
+		t.Fatalf("seed targets: %v", err)
+	}
+	// Target 1 keeps an active organization; target 2 is linked only to a
+	// soft-deleted organization whose organization_target rows are never
+	// cleared by the soft delete. The deleted_at guard makes that stale link
+	// invisible, so targets 2 and 3 both count as unbound.
+	if err := db.Exec(`INSERT INTO organization (id, name, deleted_at) VALUES (1, 'Tencent', NULL), (2, 'Ghost', '2026-08-07 08:00:00')`).Error; err != nil {
+		t.Fatalf("seed organizations: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO organization_target (organization_id, target_id) VALUES (1, 1), (2, 2)`).Error; err != nil {
+		t.Fatalf("seed organization targets: %v", err)
+	}
+	if err := db.Create([]model.Website{
+		{ID: 1, TargetID: 1, URL: "https://bound.example.test", Host: "bound.example.test", CreatedAt: now, Tech: pq.StringArray{}},
+		{ID: 2, TargetID: 2, URL: "https://ghost.example.test", Host: "ghost.example.test", CreatedAt: now.Add(-time.Second), Tech: pq.StringArray{}},
+		{ID: 3, TargetID: 3, URL: "https://unbound.example.test", Host: "unbound.example.test", CreatedAt: now.Add(-2 * time.Second), Tech: pq.StringArray{}},
+	}).Error; err != nil {
+		t.Fatalf("seed websites: %v", err)
+	}
+	if err := db.Create(&model.Endpoint{ID: 4, TargetID: 3, URL: "https://unbound.example.test/api", Host: "unbound.example.test", CreatedAt: now, Tech: pq.StringArray{}}).Error; err != nil {
+		t.Fatalf("seed endpoint: %v", err)
+	}
+
+	unboundAST, err := assetapp.ParseGlobalAssetSearchQuery(`organization==""`)
+	if err != nil {
+		t.Fatalf("parse unbound organization query: %v", err)
+	}
+	websites, total, capped, err := NewWebsiteRepository(db).SearchGlobalWebsites(context.Background(), assetapp.GlobalAssetSearchStoreQuery{AST: unboundAST, PageSize: 10})
+	if err != nil || len(websites) != 2 || websites[0].ID != 2 || websites[1].ID != 3 || total != 2 || capped {
+		t.Fatalf("unbound search must return assets of targets without active organizations: items=%+v total=%d capped=%v err=%v", websites, total, capped, err)
+	}
+
+	endpoints, total, capped, err := NewEndpointRepository(db).SearchGlobalEndpoints(context.Background(), assetapp.GlobalAssetSearchStoreQuery{AST: unboundAST, PageSize: 10})
+	if err != nil || len(endpoints) != 1 || endpoints[0].ID != 4 || total != 1 || capped {
+		t.Fatalf("unbound search must apply to Endpoint rows: items=%+v total=%d capped=%v err=%v", endpoints, total, capped, err)
+	}
+
+	combinedAST, err := assetapp.ParseGlobalAssetSearchQuery(`organization=="" && host="unbound"`)
+	if err != nil {
+		t.Fatalf("parse combined unbound query: %v", err)
+	}
+	websites, total, capped, err = NewWebsiteRepository(db).SearchGlobalWebsites(context.Background(), assetapp.GlobalAssetSearchStoreQuery{AST: combinedAST, PageSize: 10})
+	if err != nil || len(websites) != 1 || websites[0].ID != 3 || total != 1 || capped {
+		t.Fatalf("unbound condition must AND with field predicates: items=%+v total=%d capped=%v err=%v", websites, total, capped, err)
+	}
+}
+
 func TestGlobalAssetSearchRepositoryUsesStableKeysetAndFieldSemantics(t *testing.T) {
 	db := newAssetRepositoryDB(t)
 	now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)

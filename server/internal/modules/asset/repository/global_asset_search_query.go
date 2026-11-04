@@ -157,6 +157,15 @@ func globalAssetSearchConditionPredicate(condition assetapp.GlobalAssetSearchCon
 		// Match the stored header blob only. Truncation stays a result flag.
 		return globalAssetSearchTextPredicate("asset.response_headers", condition.Operator, condition.Text, dialect), nil
 	case assetapp.GlobalAssetSearchFieldOrganization:
+		// The exact empty form organization=="" selects assets whose target is
+		// bound to no active organization. Soft-deleting an organization does
+		// not clear its organization_target rows, so the deleted_at guard is
+		// what keeps stale links to deleted organizations invisible here.
+		if condition.Operator == assetapp.GlobalAssetSearchOperatorExact && condition.Text == "" {
+			return globalAssetSearchPredicate{
+				clause: "NOT EXISTS (SELECT 1 FROM organization_target AS org_target JOIN organization AS org ON org.id = org_target.organization_id AND org.deleted_at IS NULL WHERE org_target.target_id = asset.target_id)",
+			}, nil
+		}
 		// Keep each organization condition as an independent existence probe.
 		// A direct many-to-many join would duplicate asset rows and would make
 		// organization==A && organization==B impossible to express correctly.
