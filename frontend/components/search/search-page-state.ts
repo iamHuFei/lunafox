@@ -6,17 +6,24 @@ import { useTranslations } from "next-intl"
 import { readJsonStorage, writeJsonStorage } from "@/lib/browser-storage"
 import {
   GLOBAL_ASSET_SEARCH_DEFAULT_PAGE_SIZE,
+  composeGlobalAssetSearchQuery,
+  decomposeGlobalAssetSearchQuery,
   getGlobalAssetSearchDiagnosticCode,
   getGlobalAssetSearchDiagnosticMessageKeys,
-  parseGlobalAssetSearchQuery,
   isGlobalAssetSearchQueryValid,
+  parseGlobalAssetSearchQuery,
   type GlobalAssetSearchDiagnosticCode,
+  type GlobalAssetSearchOrgScope,
 } from "@/lib/global-asset-search-query"
 import { useAssetSearch } from "@/hooks/use-search"
+import { useOrganizations } from "@/hooks/use-organizations"
+import type { Organization } from "@/types/organization.types"
 import type { AssetType, SearchParams, SearchState } from "@/types/search.types"
 
 const RECENT_SEARCHES_KEY = "star_patrol_recent_searches"
 const MAX_RECENT_SEARCHES = 5
+/** The picker lists the first page of organizations; the tail surfaces a hint. */
+const ORG_SCOPE_OPTIONS_PAGE_SIZE = 100
 
 function getRecentSearches(): string[] {
   if (typeof window === "undefined") return []
@@ -52,32 +59,81 @@ function getQueryDiagnosticCode(query: string): GlobalAssetSearchDiagnosticCode 
   }
 }
 
+// scopeNotCombinable is a compose-level property of the draft plus the live
+// scope, so refreshing it has to re-run the composition, not just the parser.
+function getComposedQueryDiagnosticCode(query: string, scope: GlobalAssetSearchOrgScope): GlobalAssetSearchDiagnosticCode | null {
+  try {
+    composeGlobalAssetSearchQuery(query, scope)
+    return null
+  } catch (error) {
+    return getGlobalAssetSearchDiagnosticCode(error)
+  }
+}
+
+function isSameOrgScope(left: GlobalAssetSearchOrgScope, right: GlobalAssetSearchOrgScope): boolean {
+  if (left.mode !== right.mode) return false
+  if (left.mode === "organization" && right.mode === "organization") {
+    return left.name === right.name
+  }
+  return true
+}
+
 export function useSearchPageState() {
   const t = useTranslations("search")
   const urlSearchParams = useSearchParams()
   // Keep the draft as entered for shareable search links; the query parser
   // trims user-facing contains terms before building the search predicate.
-  const initialQuery = urlSearchParams.get("q") ?? ""
-  const initialQueryIsValid = !initialQuery || isGlobalAssetSearchQueryValid(initialQuery)
-  const initialQueryDiagnosticCode = initialQuery && !initialQueryIsValid
-    ? getQueryDiagnosticCode(initialQuery)
+  const initialUrlQuery = urlSearchParams.get("q") ?? ""
+  // Organization names are unknown on the first render, so a shared URL
+  // scoped by an organization name starts verbatim under the all scope; the
+  // reconciliation effect upgrades the picker once the list resolves.
+  const initialDecomposition = decomposeGlobalAssetSearchQuery(initialUrlQuery, [])
+  const initialQuery = initialDecomposition.text
+  const initialOrgScope = initialDecomposition.scope
+  const initialUrlQueryIsValid = !initialUrlQuery || isGlobalAssetSearchQueryValid(initialUrlQuery)
+  const initialQueryDiagnosticCode = initialUrlQuery && !initialUrlQueryIsValid
+    ? getQueryDiagnosticCode(initialUrlQuery)
     : null
-  const initialSearchParams: SearchParams | undefined = initialQuery && initialQueryIsValid
-    ? { q: initialQuery, assetType: "website", pageSize: GLOBAL_ASSET_SEARCH_DEFAULT_PAGE_SIZE }
+  // Without a URL query the page opens on the unbound-targets default, so the
+  // scope condition itself becomes the submitted query.
+  const initialAutoScopeQuery = (() => {
+    if (initialOrgScope.mode === "all") return ""
+    const composed = composeGlobalAssetSearchQuery("", initialOrgScope)
+    return composed.status === "query" ? composed.query : ""
+  })()
+  const initialSubmittedQuery = initialUrlQuery
+    ? (initialUrlQueryIsValid ? initialUrlQuery : "")
+    : initialAutoScopeQuery
+  const initialSearchParams: SearchParams | undefined = initialSubmittedQuery
+    ? { q: initialSubmittedQuery, assetType: "website", pageSize: GLOBAL_ASSET_SEARCH_DEFAULT_PAGE_SIZE }
     : undefined
   const [searchState, setSearchState] = React.useState<SearchState>(() => (
     initialSearchParams ? "searching" : "initial"
   ))
   const [query, setQueryState] = React.useState(initialQuery)
   const [assetType, setAssetType] = React.useState<AssetType>("website")
-  const [submittedQuery, setSubmittedQuery] = React.useState(initialSearchParams?.q ?? "")
+  const [orgScope, setOrgScope] = React.useState<GlobalAssetSearchOrgScope>(initialOrgScope)
+  const [submittedQuery, setSubmittedQuery] = React.useState(initialSubmittedQuery)
   const [pageSize, setPageSize] = React.useState(GLOBAL_ASSET_SEARCH_DEFAULT_PAGE_SIZE)
   const [pageTokens, setPageTokens] = React.useState<Array<string | undefined>>([undefined])
   const [pageIndex, setPageIndex] = React.useState(0)
   const [organizationSearchRevision, setOrganizationSearchRevision] = React.useState(0)
   const [recentSearches, setRecentSearches] = React.useState<string[]>([])
   const [queryDiagnosticCode, setQueryDiagnosticCode] = React.useState<GlobalAssetSearchDiagnosticCode | null>(initialQueryDiagnosticCode)
-  const lastUrlQueryRef = React.useRef(initialQuery)
+  const lastUrlQueryRef = React.useRef(initialUrlQuery)
+  const userInteractedRef = React.useRef(false)
+  const orgOptionsListReconciledRef = React.useRef(false)
+
+  const orgOptionsQuery = useOrganizations({ pageSize: ORG_SCOPE_OPTIONS_PAGE_SIZE, orderBy: "displayName asc" })
+  const orgOptions = React.useMemo<Organization[]>(
+    () => orgOptionsQuery.data?.organizations ?? [],
+    [orgOptionsQuery.data]
+  )
+  const orgOptionsHasMore = Boolean(orgOptionsQuery.data?.nextPageToken)
+  const knownOrgNames = React.useMemo(
+    () => orgOptions.map((organization) => organization.name),
+    [orgOptions]
+  )
 
   const setQuery = React.useCallback((nextQuery: React.SetStateAction<string>) => {
     setQueryState(nextQuery)
@@ -89,20 +145,35 @@ export function useSearchPageState() {
     setRecentSearches(getRecentSearches())
   }, [])
 
-  const beginSearch = React.useCallback((nextQuery: string, nextAssetType: AssetType, nextPageSize = pageSize) => {
+  const beginSearch = React.useCallback((nextQuery: string, nextAssetType: AssetType, nextPageSize = pageSize, nextScope = orgScope) => {
+    let composed: ReturnType<typeof composeGlobalAssetSearchQuery>
     try {
-      const parsed = parseGlobalAssetSearchQuery(nextQuery)
-      if (parsed.mode === "structured" && parsed.conditions.some((condition) => condition.field === "organization")) {
-        setOrganizationSearchRevision((current) => current + 1)
-      }
+      composed = composeGlobalAssetSearchQuery(nextQuery, nextScope)
     } catch (error) {
       setQueryDiagnosticCode(getGlobalAssetSearchDiagnosticCode(error))
       return false
     }
+    if (composed.status === "none") {
+      setQueryDiagnosticCode("required")
+      return false
+    }
+
+    userInteractedRef.current = true
+    // composeGlobalAssetSearchQuery re-parses its output, so the submitted
+    // query is guaranteed valid here and the parse only inspects the shape.
+    const parsedSubmitted = parseGlobalAssetSearchQuery(composed.query)
+    if (parsedSubmitted.mode === "structured" && parsedSubmitted.conditions.some((condition) => condition.field === "organization")) {
+      setOrganizationSearchRevision((current) => current + 1)
+    }
+    // A draft that carries its own organization condition wins over the
+    // picker; the picker resets to the all scope instead of re-scoping.
+    if (composed.takeover) {
+      setOrgScope({ mode: "all" })
+    }
 
     setQueryState(nextQuery)
     setAssetType(nextAssetType)
-    setSubmittedQuery(nextQuery)
+    setSubmittedQuery(composed.query)
     setPageSize(nextPageSize)
     setPageTokens([undefined])
     setPageIndex(0)
@@ -111,26 +182,33 @@ export function useSearchPageState() {
     saveRecentSearch(nextQuery)
     setRecentSearches(getRecentSearches())
     return true
-  }, [pageSize])
+  }, [orgScope, pageSize])
 
   React.useEffect(() => {
     if (!queryDiagnosticCode) return
-    const nextCode = getQueryDiagnosticCode(query)
+    const nextCode = queryDiagnosticCode === "scopeNotCombinable"
+      ? getComposedQueryDiagnosticCode(query, orgScope)
+      : getQueryDiagnosticCode(query)
     setQueryDiagnosticCode((current) => current === nextCode ? current : nextCode)
-  }, [query, queryDiagnosticCode])
+  }, [orgScope, query, queryDiagnosticCode])
 
   React.useEffect(() => {
     const nextQuery = urlSearchParams.get("q") ?? ""
     if (nextQuery === lastUrlQueryRef.current) return
     lastUrlQueryRef.current = nextQuery
+    userInteractedRef.current = true
     setQueryState(nextQuery)
 
     if (!nextQuery) {
-      setSubmittedQuery("")
-      setPageTokens([undefined])
-      setPageIndex(0)
-      setSearchState("initial")
-      setQueryDiagnosticCode(null)
+      if (orgScope.mode === "all") {
+        setSubmittedQuery("")
+        setPageTokens([undefined])
+        setPageIndex(0)
+        setSearchState("initial")
+        setQueryDiagnosticCode(null)
+        return
+      }
+      beginSearch("", "website", pageSize, orgScope)
       return
     }
     const nextCode = getQueryDiagnosticCode(nextQuery)
@@ -142,8 +220,24 @@ export function useSearchPageState() {
       setQueryDiagnosticCode(nextCode)
       return
     }
-    beginSearch(nextQuery, "website")
-  }, [beginSearch, urlSearchParams])
+    const decomposition = decomposeGlobalAssetSearchQuery(nextQuery, knownOrgNames)
+    setOrgScope(decomposition.scope)
+    beginSearch(decomposition.text, "website", pageSize, decomposition.scope)
+  }, [beginSearch, knownOrgNames, orgScope, pageSize, urlSearchParams])
+
+  // A shared URL scoped by organization loads before the organization list
+  // resolves; once the names first arrive, upgrade the picker and the draft
+  // to the decomposed form without disturbing the already submitted query.
+  // The latch keeps this to a single pass: re-running it on later draft edits
+  // would roll the user's draft back to the URL decomposition.
+  React.useEffect(() => {
+    if (orgOptionsListReconciledRef.current || orgOptionsQuery.data === undefined) return
+    orgOptionsListReconciledRef.current = true
+    if (userInteractedRef.current) return
+    const reconciled = decomposeGlobalAssetSearchQuery(initialUrlQuery, knownOrgNames)
+    setOrgScope(reconciled.scope)
+    setQueryState(reconciled.text)
+  }, [initialUrlQuery, knownOrgNames, orgOptionsQuery.data])
 
   const activeSearchParams = React.useMemo<SearchParams | undefined>(() => {
     if (!submittedQuery) return undefined
@@ -205,27 +299,44 @@ export function useSearchPageState() {
     setRecentSearches(getRecentSearches())
   }, [])
 
+  const handleOrgScopeChange = React.useCallback((nextScope: GlobalAssetSearchOrgScope) => {
+    if (isSameOrgScope(nextScope, orgScope)) return
+    userInteractedRef.current = true
+    setOrgScope(nextScope)
+    // Selecting the all scope with an empty draft returns to the guided
+    // initial shell; every other scope lists its full result set directly.
+    if (nextScope.mode === "all" && !query.trim()) {
+      setSubmittedQuery("")
+      setPageTokens([undefined])
+      setPageIndex(0)
+      setSearchState("initial")
+      setQueryDiagnosticCode(null)
+      return
+    }
+    beginSearch(query, assetType, pageSize, nextScope)
+  }, [assetType, beginSearch, orgScope, pageSize, query])
+
   const handleAssetTypeChange = React.useCallback((value: AssetType) => {
     if (value === assetType) return
     if (submittedQuery) {
-      beginSearch(submittedQuery, value)
+      beginSearch(query, value)
       return
     }
     setAssetType(value)
     setPageTokens([undefined])
     setPageIndex(0)
-  }, [assetType, beginSearch, submittedQuery])
+  }, [assetType, beginSearch, query, submittedQuery])
 
   const handlePageSizeChange = React.useCallback((nextPageSize: number) => {
     if (nextPageSize === pageSize) return
     if (submittedQuery) {
-      beginSearch(submittedQuery, assetType, nextPageSize)
+      beginSearch(query, assetType, nextPageSize)
       return
     }
     setPageSize(nextPageSize)
     setPageTokens([undefined])
     setPageIndex(0)
-  }, [assetType, beginSearch, pageSize, submittedQuery])
+  }, [assetType, beginSearch, pageSize, query, submittedQuery])
 
   const handlePreviousPage = React.useCallback(() => {
     if (pageIndex === 0) return
@@ -254,6 +365,10 @@ export function useSearchPageState() {
     query,
     submittedQuery,
     assetType,
+    orgScope,
+    orgOptions,
+    orgOptionsLoading: orgOptionsQuery.isLoading,
+    orgOptionsHasMore,
     pageSize,
     recentSearches,
     queryError,
@@ -272,6 +387,7 @@ export function useSearchPageState() {
     handleQuickTagClick,
     handleRecentSearchClick,
     handleRemoveRecentSearch,
+    handleOrgScopeChange,
     handleAssetTypeChange,
     handlePageSizeChange,
     handlePreviousPage,

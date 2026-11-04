@@ -111,4 +111,14 @@ describe("search-page-sections contract", () => {
     expect(source).not.toContain("totalPages")
     expect(source).not.toContain("vulnerabilit")
   })
+
+  it("keeps the organization scope picker leftmost in the search bar", () => {
+    expect(source).toContain('from "./search-org-scope-select"')
+    const integratedBar = source.indexOf("<SearchAssetBarShell>")
+    const orgScopeSelect = source.indexOf("<SearchOrgScopeSelect state={state} />")
+    const assetTypeSelector = source.indexOf("<SearchAssetTypeSelector state={state} integrated />")
+    expect(orgScopeSelect).toBeGreaterThan(integratedBar)
+    expect(orgScopeSelect).toBeLessThan(assetTypeSelector)
+    expect(source.match(/<SelectShellSkeleton/g)?.length).toBeGreaterThanOrEqual(2)
+  })
 })

@@ -80,6 +80,33 @@
   match, or `||` or the word `or` when any condition may match. The shared
   frontend parser rejects mixed connectors and other unsupported syntax before
   fetching.
+
+## Organization Scope Contract
+
+- The search bar carries an organization scope picker on its left edge
+  (`SearchOrgScopeSelect`). The scope rides inside the submitted `q` as an
+  `organization` condition, so listings, page tokens, exports, and shared
+  links share one code path with no extra API surface.
+- The default scope is `unbound` (`organization==""`): a cold entry without a
+  URL `q` auto-searches assets whose target is linked to no active
+  organization. `all` restores the unscoped behavior (an empty draft under
+  `all` returns to the guided initial shell), and an organization name scopes
+  both listings and typed drafts.
+- `composeGlobalAssetSearchQuery` merges the draft with the scope; it is
+  idempotent for an already scoped draft (asset-type and page-size resubmits
+  must not duplicate the condition), and a draft that carries a different
+  organization condition takes over: the draft is submitted verbatim and the
+  picker resets to `all`.
+- OR-combinator drafts cannot carry a scope in the flat DSL; composition
+  rejects them with the `scopeNotCombinable` diagnostic instead of widening
+  the filter silently.
+- `decomposeGlobalAssetSearchQuery` splits a shared URL `q` into scope plus
+  draft; unknown names, contains matches, multiple organization conditions,
+  and OR queries stay verbatim under `all`. The organization list resolves
+  asynchronously, so a scoped shared URL upgrades the picker through the
+  guarded reconciliation effect without disturbing the submitted query.
+- Recent searches persist the raw draft, not the composed query, so clicking
+  one and resubmitting re-composes against the live scope.
 - `=` contains values for URL, host, title, and organization require at least
   two Unicode characters; response headers keep their three-character minimum.
   `==` exact values are not subject to these minimums; status codes remain

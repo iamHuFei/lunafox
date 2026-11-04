@@ -3,16 +3,29 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 
-const hookMocks = vi.hoisted(() => ({
-  query: "",
-  useAssetSearch: vi.fn(() => ({
-    data: undefined,
+const hookMocks = vi.hoisted(() => {
+  const organizationsResult = {
+    data: {
+      organizations: [
+        { id: 1, name: "Acme", description: "", createdAt: "", updatedAt: "" },
+        { id: 2, name: "腾讯", description: "", createdAt: "", updatedAt: "" },
+      ],
+      nextPageToken: undefined,
+    },
     isLoading: false,
-    error: null,
-    isFetching: false,
-    refetch: vi.fn(),
-  })),
-}))
+  }
+  return {
+    query: "",
+    useAssetSearch: vi.fn(() => ({
+      data: undefined,
+      isLoading: false,
+      error: null,
+      isFetching: false,
+      refetch: vi.fn(),
+    })),
+    useOrganizations: vi.fn(() => organizationsResult),
+  }
+})
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => ({
@@ -24,9 +37,15 @@ vi.mock("@/hooks/use-search", () => ({
   useAssetSearch: hookMocks.useAssetSearch,
 }))
 
+vi.mock("@/hooks/use-organizations", () => ({
+  useOrganizations: hookMocks.useOrganizations,
+}))
+
 import { useSearchPageState } from "../search-page-state"
 
 const source = readFileSync(path.resolve(process.cwd(), "components/search/search-page-state.ts"), "utf8")
+
+const UNBOUND_REQUEST = { q: 'organization==""', assetType: "website", pageSize: 10 }
 
 describe("search-page-state contract", () => {
   afterEach(() => {
@@ -47,7 +66,8 @@ describe("search-page-state contract", () => {
   })
 
   it("validates before a query reaches the search hook", () => {
-    expect(source).toContain("parseGlobalAssetSearchQuery(nextQuery)")
+    expect(source).toContain("composeGlobalAssetSearchQuery(nextQuery, nextScope)")
+    expect(source).toContain("parseGlobalAssetSearchQuery(composed.query)")
     expect(source).toContain("getGlobalAssetSearchDiagnosticCode(error)")
     expect(source).toContain("queryDiagnosticCode")
     expect(source).toContain("setPageTokens([undefined])")
@@ -55,9 +75,9 @@ describe("search-page-state contract", () => {
   })
 
   it("starts a valid URL query synchronously with the original parameters", () => {
-    expect(source).toContain('const initialQuery = urlSearchParams.get("q") ?? ""')
+    expect(source).toContain('const initialUrlQuery = urlSearchParams.get("q") ?? ""')
     expect(source).toContain("const initialSearchParams: SearchParams | undefined")
-    expect(source).toContain('{ q: initialQuery, assetType: "website", pageSize: GLOBAL_ASSET_SEARCH_DEFAULT_PAGE_SIZE }')
+    expect(source).toContain('{ q: initialSubmittedQuery, assetType: "website", pageSize: GLOBAL_ASSET_SEARCH_DEFAULT_PAGE_SIZE }')
     expect(source).toContain('initialSearchParams ? "searching" : "initial"')
     expect(source).toContain("useAssetSearch(activeSearchParams")
   })
@@ -75,6 +95,99 @@ describe("search-page-state contract", () => {
     )
   })
 
+  it("auto-searches unbound targets on cold entry without a URL query", () => {
+    const { result } = renderHook(() => useSearchPageState())
+
+    expect(result.current.query).toBe("")
+    expect(result.current.orgScope).toEqual({ mode: "unbound" })
+    expect(result.current.searchState).toBe("searching")
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(UNBOUND_REQUEST, { enabled: true })
+  })
+
+  it("auto-searches a selected organization with an empty draft and returns to the shell under all", () => {
+    const { result } = renderHook(() => useSearchPageState())
+
+    act(() => {
+      result.current.handleOrgScopeChange({ mode: "organization", name: "Acme" })
+    })
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(
+      { q: 'organization=="Acme"', assetType: "website", pageSize: 10 },
+      { enabled: true, requestNonce: 1 },
+    )
+    expect(result.current.orgScope).toEqual({ mode: "organization", name: "Acme" })
+
+    act(() => {
+      result.current.handleOrgScopeChange({ mode: "all" })
+    })
+    expect(result.current.searchState).toBe("initial")
+    expect(result.current.orgScope).toEqual({ mode: "all" })
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(undefined, { enabled: false })
+  })
+
+  it("composes a typed draft with the active scope", () => {
+    const { result } = renderHook(() => useSearchPageState())
+
+    act(() => {
+      result.current.setQuery('host="api"')
+    })
+    act(() => {
+      result.current.handleSearch()
+    })
+
+    expect(result.current.query).toBe('host="api"')
+    expect(result.current.submittedQuery).toBe('host="api" && organization==""')
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(
+      { q: 'host="api" && organization==""', assetType: "website", pageSize: 10 },
+      { enabled: true, requestNonce: 1 },
+    )
+  })
+
+  it("lets a draft organization condition take over the scope", () => {
+    const { result } = renderHook(() => useSearchPageState())
+
+    act(() => {
+      result.current.setQuery('organization="Acme"')
+    })
+    act(() => {
+      result.current.handleSearch()
+    })
+
+    expect(result.current.orgScope).toEqual({ mode: "all" })
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(
+      { q: 'organization="Acme"', assetType: "website", pageSize: 10 },
+      { enabled: true, requestNonce: 1 },
+    )
+  })
+
+  it("rejects an or-draft under a scoped picker with the scope diagnostic", () => {
+    const { result } = renderHook(() => useSearchPageState())
+
+    act(() => {
+      result.current.setQuery('url="ab" || host="cd"')
+    })
+    act(() => {
+      result.current.handleSearch()
+    })
+
+    expect(result.current.queryDiagnosticCode).toBe("scopeNotCombinable")
+    expect(result.current.searchState).toBe("searching")
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(UNBOUND_REQUEST, { enabled: true })
+    expect(window.localStorage.getItem("star_patrol_recent_searches")).toBeNull()
+  })
+
+  it("decomposes a shared URL query into scope plus draft", () => {
+    hookMocks.query = 'host="api" && organization==""'
+
+    const { result } = renderHook(() => useSearchPageState())
+
+    expect(result.current.query).toBe('host="api"')
+    expect(result.current.orgScope).toEqual({ mode: "unbound" })
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(
+      { q: 'host="api" && organization==""', assetType: "website", pageSize: 10 },
+      { enabled: true },
+    )
+  })
+
   it("puts a quick tag into the draft query without starting a search", () => {
     const { result } = renderHook(() => useSearchPageState())
 
@@ -83,9 +196,9 @@ describe("search-page-state contract", () => {
     })
 
     expect(result.current.query).toBe('statusCode=="200"')
-    expect(result.current.searchState).toBe("initial")
+    expect(result.current.searchState).toBe("searching")
     expect(result.current.recentSearches).toEqual([])
-    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(undefined, { enabled: false })
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(UNBOUND_REQUEST, { enabled: true })
   })
 
   it("puts a recent search into the draft query without starting a search", () => {
@@ -98,10 +211,9 @@ describe("search-page-state contract", () => {
     })
 
     expect(result.current.query).toBe(recentQuery)
-    expect(result.current.searchState).toBe("initial")
     expect(result.current.recentSearches).toEqual([recentQuery])
     expect(window.localStorage.getItem("star_patrol_recent_searches")).toBe(JSON.stringify([recentQuery]))
-    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(undefined, { enabled: false })
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(UNBOUND_REQUEST, { enabled: true })
   })
 
   it("shows a specific diagnostic only after an invalid submit and fast-fails", () => {
@@ -118,8 +230,8 @@ describe("search-page-state contract", () => {
 
     expect(result.current.queryError).toContain("diagnostics.containsValueTooShort")
     expect(result.current.queryDiagnosticCode).toBe("containsValueTooShort")
-    expect(result.current.searchState).toBe("initial")
-    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(undefined, { enabled: false })
+    expect(result.current.searchState).toBe("searching")
+    expect(hookMocks.useAssetSearch).toHaveBeenLastCalledWith(UNBOUND_REQUEST, { enabled: true })
     expect(window.localStorage.getItem("star_patrol_recent_searches")).toBeNull()
   })
 

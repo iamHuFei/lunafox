@@ -62,6 +62,7 @@ import {
   SearchQuickTags,
 } from "./search-initial-page-shell"
 import type { SearchPageState } from "./search-page-state"
+import { SearchOrgScopeSelect } from "./search-org-scope-select"
 import { useGlobalAssetSearchExport } from "@/hooks/use-global-asset-search-export"
 
 const EMPTY_WEBSITE_RESULTS: WebsiteSearchResult[] = []
@@ -219,6 +220,7 @@ export function SearchAssetBar({ state, className }: { state: SearchPageState; c
     <div className={cn("min-w-0", className)}>
       <Popover open={syntaxOpen} onOpenChange={setSyntaxOpen} modal={false}>
         <SearchAssetBarShell>
+          <SearchOrgScopeSelect state={state} />
           <SearchAssetTypeSelector state={state} integrated />
           <form
             className="flex min-w-0 flex-1"
@@ -370,6 +372,11 @@ function SearchResultsLoadingState({
     <>
       <SearchResultsToolbarRegion>
         <SearchAssetBarShell className="w-full md:flex-1">
+          <SelectShellSkeleton
+            size="default"
+            widthClassName="radius-none w-40 border-0 border-r bg-muted/30 px-4 text-sm shadow-none"
+            valueWidthClassName="w-16"
+          />
           <SelectShellSkeleton
             size="default"
             widthClassName="radius-none w-40 border-0 border-r bg-muted/30 px-4 text-sm shadow-none"
