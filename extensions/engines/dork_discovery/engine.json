@@ -1,0 +1,107 @@
+{
+  "manifestVersion": "engine.v5",
+  "engineId": "engine.lunafox.dork_discovery",
+  "publisher": "iamHuFei",
+  "execution": {
+    "engineApiMajor": 2,
+    "supportedTargetTypes": [
+      "domain"
+    ],
+    "configSections": [
+      {
+        "id": "dork_search",
+        "defaultEnabled": true,
+        "params": [
+          {
+            "key": "dorks",
+            "type": "stringArray",
+            "default": [
+              "site:{target}",
+              "site:{target} inurl:login",
+              "site:{target} inurl:admin"
+            ],
+            "minItems": 1,
+            "maxItems": 16
+          },
+          {
+            "key": "provider",
+            "type": "string",
+            "default": "bing",
+            "enum": ["bing"],
+            "minLength": 1
+          },
+          {
+            "key": "max-pages",
+            "type": "integer",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 3
+          },
+          {
+            "key": "page-size",
+            "type": "integer",
+            "default": 50,
+            "minimum": 10,
+            "maximum": 50
+          },
+          {
+            "key": "request-timeout",
+            "type": "integer",
+            "default": 10,
+            "unit": "seconds",
+            "minimum": 1,
+            "maximum": 60
+          },
+          {
+            "key": "request-delay-ms",
+            "type": "integer",
+            "default": 1200,
+            "minimum": 0,
+            "maximum": 10000
+          }
+        ]
+      },
+      {
+        "id": "probe",
+        "defaultEnabled": true,
+        "params": [
+          {
+            "key": "request-timeout",
+            "type": "integer",
+            "default": 8,
+            "unit": "seconds",
+            "minimum": 1,
+            "maximum": 60
+          },
+          {
+            "key": "concurrency",
+            "type": "integer",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20
+          },
+          {
+            "key": "body-limit-kb",
+            "type": "integer",
+            "default": 64,
+            "minimum": 1,
+            "maximum": 512
+          },
+          {
+            "key": "follow-redirects",
+            "type": "boolean",
+            "default": true
+          },
+          {
+            "key": "timeout",
+            "type": "integer",
+            "default": 600,
+            "unit": "seconds",
+            "minimum": 60,
+            "maximum": 3600
+          }
+        ]
+      }
+    ]
+  }
+}

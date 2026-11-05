@@ -1,0 +1,53 @@
+{
+  "engine": {
+    "displayName": "Dork 资产发现",
+    "description": "用搜索引擎 Dork 语法（必应国际模式）测绘常规扫描遗漏的存活资产：发现新子域名与 URL 并做 HTTP 存活探测"
+  },
+  "sections": {
+    "dork_search": {
+      "name": "Dork 检索",
+      "description": "按模板渲染 Dork 后查询必应国际模式，采集目标范围内的结果链接。模板中的 {target} 会替换为目标域名；模板不要包含逗号（界面以逗号分隔列表）",
+      "params": {
+        "dorks": {
+          "description": "Dork 查询模板列表，支持 {target} 占位符。site:{target} 同时发现子域名与 URL；叠加 inurl:/intitle:/filetype: 等算符（如 site:{target} inurl:login、site:{target} intitle:后台、site:{target} filetype:sql）可定向挖掘后台入口、敏感文件等具体 URL。模板不要包含逗号（界面以逗号分隔列表）"
+        },
+        "provider": {
+          "description": "搜索引擎提供方，当前仅支持 bing（必应国际模式）"
+        },
+        "max-pages": {
+          "description": "每个 Dork 最多翻取的结果页数"
+        },
+        "page-size": {
+          "description": "每页请求的结果条数"
+        },
+        "request-timeout": {
+          "description": "单次搜索请求超时时间"
+        },
+        "request-delay-ms": {
+          "description": "相邻搜索请求之间的礼貌间隔毫秒数"
+        }
+      }
+    },
+    "probe": {
+      "name": "存活探测",
+      "description": "对采集到的 URL 做并发 HTTP 探测，仅提交有响应的存活资产",
+      "params": {
+        "request-timeout": {
+          "description": "单个探测请求的超时时间"
+        },
+        "concurrency": {
+          "description": "探测并发数"
+        },
+        "body-limit-kb": {
+          "description": "读取响应体的上限（KB），用于提取页面标题"
+        },
+        "follow-redirects": {
+          "description": "是否跟随重定向"
+        },
+        "timeout": {
+          "description": "整个引擎执行的总预算"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "engine": {
+    "displayName": "Dork Discovery",
+    "description": "Discovers live assets that regular scanning misses by running Google-style dorks against Bing international mode, harvesting in-scope subdomains and URLs, and probing them over HTTP"
+  },
+  "sections": {
+    "dork_search": {
+      "name": "Dork search",
+      "description": "Renders dork templates and queries Bing international mode. {target} in a template is replaced with the target domain; keep templates comma-free because the UI splits lists on commas",
+      "params": {
+        "dorks": {
+          "description": "Dork query templates with the {target} placeholder. site:{target} surfaces both subdomains and URLs; stacking operators such as inurl:/intitle:/filetype: (e.g. site:{target} inurl:login, site:{target} intitle:admin, site:{target} filetype:sql) targets specific URLs like admin panels and sensitive files. Keep templates comma-free because the UI splits lists on commas"
+        },
+        "provider": {
+          "description": "Search provider; currently bing (Bing international mode) only"
+        },
+        "max-pages": {
+          "description": "Maximum result pages fetched per dork"
+        },
+        "page-size": {
+          "description": "Requested results per page"
+        },
+        "request-timeout": {
+          "description": "Timeout for a single search request"
+        },
+        "request-delay-ms": {
+          "description": "Polite delay in milliseconds between search requests"
+        }
+      }
+    },
+    "probe": {
+      "name": "Liveness probe",
+      "description": "Probes harvested URLs concurrently and submits only the ones that respond",
+      "params": {
+        "request-timeout": {
+          "description": "Timeout for a single probe request"
+        },
+        "concurrency": {
+          "description": "Probe concurrency"
+        },
+        "body-limit-kb": {
+          "description": "Response body read limit in KB used for title extraction"
+        },
+        "follow-redirects": {
+          "description": "Whether to follow redirects"
+        },
+        "timeout": {
+          "description": "Overall budget for the whole engine execution"
+        }
+      }
+    }
+  }
+}
