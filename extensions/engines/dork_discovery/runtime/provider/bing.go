@@ -34,6 +34,11 @@ type BingProvider struct {
 	BaseURL string
 	HomeURL string
 	warmed  bool
+	// blockedOnce trips the circuit breaker: once Bing answers with a
+	// challenge, every further query in this run returns Blocked without
+	// hitting the endpoint, because hammering through a challenge deepens
+	// the throttle instead of clearing it.
+	blockedOnce bool
 }
 
 func NewBingProvider(timeout time.Duration) *BingProvider {
@@ -80,10 +85,19 @@ func (provider *BingProvider) warmup(ctx context.Context) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
 }
 
+// decorateHeaders mirrors a real browser top-level navigation. Bing's bot
+// defense degrades plain HTTP-client requests (even cookie-carrying ones) to
+// a generalized recommendation page; the Sec-Fetch navigation metadata and a
+// zh-first Accept-Language are what restore exact site: results.
 func (provider *BingProvider) decorateHeaders(request *http.Request) {
 	request.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	request.Header.Set("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8")
+	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	request.Header.Set("Sec-Fetch-Dest", "document")
+	request.Header.Set("Sec-Fetch-Mode", "navigate")
+	request.Header.Set("Sec-Fetch-Site", "none")
+	request.Header.Set("Sec-Fetch-User", "?1")
+	request.Header.Set("Upgrade-Insecure-Requests", "1")
 }
 
 func (provider *BingProvider) Search(ctx context.Context, query string, first, count int) (Page, error) {
@@ -91,6 +105,9 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 		return Page{}, fmt.Errorf("bing provider client is required")
 	}
 	provider.warmup(ctx)
+	if provider.blockedOnce {
+		return Page{Blocked: true}, nil
+	}
 	endpoint := provider.BaseURL + "?" + url.Values{
 		"q":        {query},
 		"ensearch": {"1"},
@@ -117,6 +134,7 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 	bodyText := string(body)
 	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
 		page.Blocked = true
+		provider.blockedOnce = true
 		return page, nil
 	}
 	hits, anomalies := ParseBingResults(bodyText)
@@ -128,6 +146,7 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 			if strings.Contains(bodyText, marker) {
 				page.Blocked = true
 				page.Anomalies = anomalies
+				provider.blockedOnce = true
 				return page, nil
 			}
 		}

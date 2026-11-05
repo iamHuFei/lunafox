@@ -58,7 +58,7 @@
           {
             "key": "request-delay-ms",
             "type": "integer",
-            "default": 1200,
+            "default": 3000,
             "minimum": 0,
             "maximum": 10000
           }
