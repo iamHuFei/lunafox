@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
@@ -23,15 +24,27 @@ var bingBlockedMarkers = []string{
 // BingProvider searches cn.bing.com in international mode. ensearch=1 keeps
 // Google-style operators (site:, inurl:, ...) effective instead of the
 // CN-market query rewriting that ignores them.
+//
+// Bing degrades cookie-less automated queries to a generalized
+// recommendation page that looks like results but contains none for the
+// dorked host, so the client carries a cookie jar warmed up once against the
+// Bing homepage before the first search.
 type BingProvider struct {
 	Client  *http.Client
 	BaseURL string
+	HomeURL string
+	warmed  bool
 }
 
 func NewBingProvider(timeout time.Duration) *BingProvider {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		jar = nil
+	}
 	return &BingProvider{
 		Client: &http.Client{
 			Timeout: timeout,
+			Jar:     jar,
 			CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
 					return http.ErrUseLastResponse
@@ -40,15 +53,44 @@ func NewBingProvider(timeout time.Duration) *BingProvider {
 			},
 		},
 		BaseURL: "https://cn.bing.com/search",
+		HomeURL: "https://cn.bing.com/",
 	}
 }
 
 func (provider *BingProvider) Name() string { return "bing" }
 
+// warmup establishes the Bing session cookies (MUID & friends) that keep
+// search results exact instead of generalized. A failed warmup is not fatal:
+// the first search proceeds cookie-less.
+func (provider *BingProvider) warmup(ctx context.Context) {
+	if provider.warmed || provider.Client == nil || provider.HomeURL == "" {
+		return
+	}
+	provider.warmed = true
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.HomeURL, nil)
+	if err != nil {
+		return
+	}
+	provider.decorateHeaders(request)
+	response, err := provider.Client.Do(request)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+}
+
+func (provider *BingProvider) decorateHeaders(request *http.Request) {
+	request.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	request.Header.Set("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8")
+}
+
 func (provider *BingProvider) Search(ctx context.Context, query string, first, count int) (Page, error) {
 	if provider == nil || provider.Client == nil {
 		return Page{}, fmt.Errorf("bing provider client is required")
 	}
+	provider.warmup(ctx)
 	endpoint := provider.BaseURL + "?" + url.Values{
 		"q":        {query},
 		"ensearch": {"1"},
@@ -60,9 +102,7 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 	if err != nil {
 		return Page{}, fmt.Errorf("build bing request: %w", err)
 	}
-	request.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	request.Header.Set("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8")
+	provider.decorateHeaders(request)
 
 	response, err := provider.Client.Do(request)
 	if err != nil {

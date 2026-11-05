@@ -835,6 +835,7 @@ func lunafoxProjectTarget(target *engineexecutionpb.CanonicalTarget) (enginecont
 	}
 	switch target.GetType() {
 	case "domain":
+	case "ip":
 	default:
 		return enginecontract.Target{}, errors.New("Target type is not supported by this Engine")
 	}

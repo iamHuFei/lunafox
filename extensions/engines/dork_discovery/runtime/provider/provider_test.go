@@ -111,7 +111,7 @@ func TestBingProviderDetectsBlockAndServesHits(t *testing.T) {
 			w.Write([]byte(captchaBody))
 			return
 		}
-		if r.URL.Query().Get("ensearch") != "1" {
+		if r.URL.Query().Get("q") != "" && r.URL.Query().Get("ensearch") != "1" {
 			t.Errorf("international mode flag missing: %v", r.URL.RawQuery)
 		}
 		w.Write([]byte(resultsBody))
@@ -120,6 +120,8 @@ func TestBingProviderDetectsBlockAndServesHits(t *testing.T) {
 
 	provider := NewBingProvider(5 * time.Second)
 	provider.BaseURL = server.URL
+	// Keep the warmup inside the test server; it accounts for one request.
+	provider.HomeURL = server.URL + "/"
 
 	page, err := provider.Search(context.Background(), "site:52pojie.cn", 1, 20)
 	if err != nil {
@@ -139,7 +141,40 @@ func TestBingProviderDetectsBlockAndServesHits(t *testing.T) {
 	if !page.Blocked {
 		t.Fatalf("captcha page must set Blocked")
 	}
-	if requestCount != 2 {
-		t.Fatalf("unexpected request count %d", requestCount)
+	if requestCount != 3 {
+		t.Fatalf("unexpected request count %d (warmup + 2 searches)", requestCount)
+	}
+}
+
+func TestBingProviderWarmsUpCookiesAndSendsThem(t *testing.T) {
+	resultsBody := loadFixture(t, "bing-site-results.html")
+	searchSawCookie := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			// The homepage warmup hands out a session cookie.
+			http.SetCookie(w, &http.Cookie{Name: "MUID", Value: "B84FD3A1E2C5"})
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if cookie, err := r.Cookie("MUID"); err == nil {
+			searchSawCookie = cookie.Value
+		}
+		w.Write([]byte(resultsBody))
+	}))
+	defer server.Close()
+
+	provider := NewBingProvider(5 * time.Second)
+	provider.BaseURL = server.URL + "/search"
+	provider.HomeURL = server.URL + "/"
+
+	page, err := provider.Search(context.Background(), "site:example.com", 1, 20)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if searchSawCookie != "B84FD3A1E2C5" {
+		t.Fatalf("search request must carry the warmup cookie, got %q", searchSawCookie)
+	}
+	if len(page.Hits) == 0 {
+		t.Fatalf("hits missing")
 	}
 }

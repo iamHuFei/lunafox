@@ -63,8 +63,8 @@ func (r *Runtime) Execute(ctx context.Context, execution *enginecontract.Executi
 	if r == nil || r.newProvider == nil {
 		return errors.New("dork discovery search provider factory is required")
 	}
-	if execution.Target.Type != enginecontract.TargetTypeDomain {
-		return errors.New("dork discovery requires a domain target")
+	if execution.Target.Type != enginecontract.TargetTypeDomain && execution.Target.Type != enginecontract.TargetTypeIP {
+		return errors.New("dork discovery requires a domain or ip target")
 	}
 	if !execution.Config.DorkSearch.Enabled {
 		if err := execution.Progress.Report(ctx, "dork_search disabled; nothing to do"); err != nil {

@@ -37,6 +37,12 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration) provider.S
 		return fmt.Errorf("report harvest progress: %w", reportErr)
 	}
 
+	// An IP target has no subdomain namespace; hosts would all equal the
+	// target address, which server-side subdomain ingestion would reject.
+	if IsIPTarget(target) {
+		hosts = nil
+	}
+
 	if !config.Probe.Enabled || len(urls) == 0 {
 		return submitResults(ctx, execution, hosts, nil)
 	}

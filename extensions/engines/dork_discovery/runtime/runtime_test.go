@@ -26,6 +26,9 @@ func TestHostInScope(t *testing.T) {
 		{"example.com.evil.net", "example.com", false},
 		{"", "example.com", false},
 		{"www.example.com", "", false},
+		{"112.13.167.113", "112.13.167.113", true},
+		{"112.13.167.113", "112.13.167.114", false},
+		{"sub.112.13.167.113", "112.13.167.113", false},
 	}
 	for _, item := range cases {
 		if got := HostInScope(item.host, item.target); got != item.want {
@@ -175,10 +178,10 @@ func TestExecuteRejectsInvalidExecutions(t *testing.T) {
 	if err := engine.Execute(context.Background(), &enginecontract.Execution{Workspace: workspace}); err == nil {
 		t.Fatal("missing progress and submitters must fail")
 	}
-	ipTarget := base()
-	ipTarget.Target.Type = enginecontract.TargetTypeIP
-	if err := engine.Execute(context.Background(), ipTarget); err == nil {
-		t.Fatal("ip target must fail")
+	cidrTarget := base()
+	cidrTarget.Target.Type = enginecontract.TargetTypeCIDR
+	if err := engine.Execute(context.Background(), cidrTarget); err == nil {
+		t.Fatal("cidr target must fail")
 	}
 	notADir := base()
 	notADir.Workspace = "/nonexistent-directory-xyz"

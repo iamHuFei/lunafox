@@ -5,7 +5,8 @@
   "execution": {
     "engineApiMajor": 2,
     "supportedTargetTypes": [
-      "domain"
+      "domain",
+      "ip"
     ],
     "configSections": [
       {
@@ -27,7 +28,9 @@
             "key": "provider",
             "type": "string",
             "default": "bing",
-            "enum": ["bing"],
+            "enum": [
+              "bing"
+            ],
             "minLength": 1
           },
           {
