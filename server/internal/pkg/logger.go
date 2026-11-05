@@ -75,6 +75,9 @@ func InitLogger(cfg *LogConfig) error {
 	}
 
 	setLogger(logger)
+	// DORK_DEBUG (fork diagnostics): route the standard zap global through the
+	// same sink so agentcontrol's zap.L() calls become observable.
+	zap.ReplaceGlobals(logger)
 	return nil
 }
 

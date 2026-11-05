@@ -121,11 +121,34 @@ func initInfra(cfg *config.Config, migrationsFS embed.FS) *infra {
 	if err := synchronizeBuiltinScanWorkflows(catalogrepo.NewScanWorkflowRepository(db)); err != nil {
 		pkg.Fatal("Failed to synchronize built-in scan workflows", zap.Error(err))
 	}
-	operatorPuller, err := engineinstall.NewORASPackagePuller(engineinstall.ORASPackagePullerOptions{
+	operatorPullerOptions := engineinstall.ORASPackagePullerOptions{
 		MaxManifestBytes: engineInstallMaxManifestBytes, MaxPackageLayerBytes: cfg.EngineInstall.MaxPackageBytes,
 		PerCandidateTimeout: engineInstallCandidateTimeout,
 		TransportRegistry:   cfg.EngineInstall.Registry,
-	})
+	}
+	operatorRuntimeVerifierOptions := engineinstall.RuntimeImageIndexVerifierOptions{
+		MaxIndexBytes:       engineInstallMaxIndexBytes,
+		PerCandidateTimeout: engineInstallCandidateTimeout,
+	}
+	if cfg.EngineInstall.DevelopmentMode {
+		// Fork patch (iamHuFei/lunafox): honor the documented development-mode
+		// Engine install flags on the operator (runtime API) path too, mirroring
+		// resolveEngineBootstrapInstallPolicy, so locally published Engine
+		// packages install without upstream sigstore signatures.
+		devTransport, devErr := engineinstall.NewDevelopmentRuntimeImageRegistryTransport(
+			cfg.EngineInstall.DevelopmentRuntimeImageIdentityRegistry,
+			cfg.EngineInstall.DevelopmentRuntimeImageTransportRegistry,
+		)
+		if devErr != nil {
+			pkg.Fatal("Operator development Engine transport configuration is invalid", zap.Error(devErr))
+		}
+		operatorPullerOptions.TransportRegistry = cfg.EngineInstall.DevelopmentRuntimeImageTransportRegistry
+		operatorPullerOptions.AllowPlainHTTP = true
+		operatorRuntimeVerifierOptions.AllowPlainHTTP = true
+		operatorRuntimeVerifierOptions.DevelopmentRegistryTransport = devTransport
+		operatorRuntimeVerifierOptions.AllowDevelopmentSinglePlatform = true
+	}
+	operatorPuller, err := engineinstall.NewORASPackagePuller(operatorPullerOptions)
 	if err != nil {
 		pkg.Fatal("Operator Engine Package installer configuration is invalid", zap.Error(err))
 	}
@@ -146,12 +169,11 @@ func initInfra(cfg *config.Config, migrationsFS embed.FS) *infra {
 			pkg.Fatal("Engine signature transport configuration is invalid", zap.Error(err))
 		}
 	}
-	operatorRuntimeVerifier, err := engineinstall.NewRuntimeImageIndexVerifier(engineinstall.RuntimeImageIndexVerifierOptions{
-		MaxIndexBytes:       engineInstallMaxIndexBytes,
-		PerCandidateTimeout: engineInstallCandidateTimeout,
-		SignatureVerifier:   operatorSignatureVerifier,
-		TransportRegistry:   cfg.EngineInstall.Registry,
-	})
+	operatorRuntimeVerifierOptions.SignatureVerifier = operatorSignatureVerifier
+	if !cfg.EngineInstall.DevelopmentMode {
+		operatorRuntimeVerifierOptions.TransportRegistry = cfg.EngineInstall.Registry
+	}
+	operatorRuntimeVerifier, err := engineinstall.NewRuntimeImageIndexVerifier(operatorRuntimeVerifierOptions)
 	if err != nil {
 		pkg.Fatal("Operator Runtime Image verifier configuration is invalid", zap.Error(err))
 	}
