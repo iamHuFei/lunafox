@@ -129,7 +129,7 @@ export function createVulnerabilityColumns({ formatDate, t, includeSelection = t
             size: vulnerabilitiesTableColumnLayout.url.size,
             minSize: vulnerabilitiesTableColumnLayout.url.minSize,
             maxSize: vulnerabilitiesTableColumnLayout.url.maxSize,
-            cell: ({ row }) => (<ExpandableUrlCell value={row.original.url} textRoleName="tableCellPrimary"/>),
+            cell: ({ row }) => (<ExpandableUrlCell value={row.original.url} textRoleName="tableCellPrimary" href={row.original.url}/>),
         },
         {
             accessorKey: "createdAt",

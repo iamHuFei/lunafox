@@ -87,7 +87,7 @@ export function createEndpointColumns({
         <div className="flex min-w-0 items-center gap-2">
           <HttpStatusBadge statusCode={row.original.statusCode} />
           <div className="min-w-0 flex-1">
-            <ExpandableCell value={row.getValue("url")} textRoleName="tableCellPrimary" />
+            <ExpandableCell value={row.getValue("url")} textRoleName="tableCellPrimary" href={row.original.url} />
           </div>
         </div>
       ),

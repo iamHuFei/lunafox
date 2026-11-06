@@ -176,7 +176,7 @@ export function SearchResultsTable({
       minSize: 200,
       maxSize: 600,
       cell: ({ row }) => (
-        <ExpandableCell value={row.getValue("url")} textRoleName="tableCellPrimary" />
+        <ExpandableCell value={row.getValue("url")} textRoleName="tableCellPrimary" href={row.original.url} />
       ),
     },
     {

@@ -124,7 +124,7 @@ export function createDirectoryColumns({
         <DataTableColumnHeader column={column} title={t.columns.url} />
       ),
       cell: ({ row }) => (
-        <ExpandableCell value={row.getValue("url")} textRoleName="tableCellPrimary" />
+        <ExpandableCell value={row.getValue("url")} textRoleName="tableCellPrimary" href={row.original.url} />
       ),
     },
     {

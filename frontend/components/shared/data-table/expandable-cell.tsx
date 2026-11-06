@@ -53,6 +53,12 @@ export interface ExpandableCellProps {
     expandLabel?: string;
     /** Collapse button text (overrides context) */
     collapseLabel?: string;
+    /**
+     * Optional absolute URL. When set the content renders as a link that
+     * opens in a new tab; the click stops propagation so row-level click
+     * handlers (drawers, detail panels) stay untouched.
+     */
+    href?: string;
 }
 /**
  * Unified expandable cell component
@@ -63,7 +69,7 @@ export interface ExpandableCellProps {
  * - Show expand/collapse button only when content overflows
  * - Supports text, url, mono, muted variants
  */
-export function ExpandableCell({ value, variant = "text", textRoleName = "body", maxLines = 3, className, placeholder = "-", expandLabel, collapseLabel, }: ExpandableCellProps) {
+export function ExpandableCell({ value, variant = "text", textRoleName = "body", maxLines = 3, className, placeholder = "-", expandLabel, collapseLabel, href, }: ExpandableCellProps) {
     const i18n = useExpandableI18n();
     const [expanded, setExpanded] = React.useState(false);
     const [isOverflowing, setIsOverflowing] = React.useState(false);
@@ -100,10 +106,17 @@ export function ExpandableCell({ value, variant = "text", textRoleName = "body",
         5: "line-clamp-5",
         6: "line-clamp-6",
     }[maxLines] || "line-clamp-3";
+    const isLink = typeof href === "string" && (href.startsWith("http://") || href.startsWith("https://"));
+    const contentClass = cn("break-all whitespace-pre-wrap", contentTextRole, variant === "mono" && monoTextRole, variant === "url" && "text-muted-foreground", variant === "muted" && "text-muted-foreground", !expanded && lineClampClass, className);
+    const content = (<div ref={contentRef} className={contentClass}>
+      {isLink
+        ? (<a href={href} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()} className="text-primary underline-offset-2 hover:underline cursor-pointer">
+            {displayValue}
+          </a>)
+        : displayValue}
+    </div>);
     return (<div className="flex flex-col gap-1">
-      <div ref={contentRef} className={cn("break-all whitespace-pre-wrap", contentTextRole, variant === "mono" && monoTextRole, variant === "url" && "text-muted-foreground", variant === "muted" && "text-muted-foreground", !expanded && lineClampClass, className)}>
-        {displayValue}
-      </div>
+      {content}
       {(isOverflowing || expanded) && (<button type="button" onClick={() => setExpanded(!expanded)} className={cn("gap-0.5 hover:underline inline-flex items-center self-start text-primary", textRole.caption)}>
           {expanded ? (<>
               <ChevronUp className="h-3 w-3"/>
