@@ -32,6 +32,9 @@
       "name": "存活探测",
       "description": "对采集到的 URL 做并发 HTTP 探测，仅提交有响应的存活资产",
       "params": {
+        "unreachable-policy": {
+          "description": "探测不可达的 URL 如何处理：record=按搜索引擎原样入库（状态码留空表示\"已收录未验证\"，常见于目标 WAF 拦截机房 IP）；skip=丢弃，只保留探测存活的资产"
+        },
         "request-timeout": {
           "description": "单个探测请求的超时时间"
         },

@@ -72,12 +72,12 @@ func New(options Options) *Prober {
 	}
 }
 
-// ProbeAll probes URLs with a bounded worker pool and returns only the
-// outcomes that received an HTTP response, in stable input order. The second
-// return value counts unreachable candidates.
-func (prober *Prober) ProbeAll(ctx context.Context, urls []string) ([]Outcome, int) {
+// ProbeAll probes URLs with a bounded worker pool and returns the outcomes
+// that received an HTTP response in stable input order, plus the URLs that
+// did not answer (no HTTP response at all).
+func (prober *Prober) ProbeAll(ctx context.Context, urls []string) ([]Outcome, []string) {
 	if prober == nil || len(urls) == 0 {
-		return nil, 0
+		return nil, nil
 	}
 	results := make([]Outcome, len(urls))
 	responded := make([]bool, len(urls))
@@ -102,12 +102,15 @@ func (prober *Prober) ProbeAll(ctx context.Context, urls []string) ([]Outcome, i
 	}
 	wg.Wait()
 	live := make([]Outcome, 0, len(urls))
+	unreachable := make([]string, 0)
 	for index := range urls {
 		if responded[index] {
 			live = append(live, results[index])
+		} else {
+			unreachable = append(unreachable, urls[index])
 		}
 	}
-	return live, len(urls) - len(live)
+	return live, unreachable
 }
 
 func (prober *Prober) probeOne(ctx context.Context, rawURL string) (Outcome, bool) {

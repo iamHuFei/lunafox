@@ -83,6 +83,8 @@ type DorkSearchConfig struct {
 type ProbeConfig struct {
 	// Source: engine.json.execution.configSections["probe"].defaultEnabled.
 	Enabled bool
+	// Source: engine.json.execution.configSections["probe"].params["unreachable-policy"].
+	UnreachablePolicy string
 	// Source: engine.json.execution.configSections["probe"].params["request-timeout"].
 	RequestTimeout int64
 	// Source: engine.json.execution.configSections["probe"].params["concurrency"].

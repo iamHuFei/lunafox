@@ -32,6 +32,9 @@
       "name": "Liveness probe",
       "description": "Probes harvested URLs concurrently and submits only the ones that respond",
       "params": {
+        "unreachable-policy": {
+          "description": "How probe-unreachable URLs are handled: record keeps them as search-indexed endpoints (empty status code means indexed-but-unverified, e.g. target WAF drops datacenter IPs); skip drops them and keeps only verified live assets"
+        },
         "request-timeout": {
           "description": "Timeout for a single probe request"
         },

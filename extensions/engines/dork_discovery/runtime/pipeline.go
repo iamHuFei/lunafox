@@ -28,7 +28,7 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration) provider.S
 	}
 
 	search := newProvider(time.Duration(config.DorkSearch.RequestTimeout) * time.Second)
-	urls, hosts, searchErr := harvest(ctx, search, execution.Progress, dorks, config.DorkSearch, target)
+	urls, hosts, titles, searchErr := harvest(ctx, search, execution.Progress, dorks, config.DorkSearch, target)
 	if searchErr != nil {
 		return searchErr
 	}
@@ -44,6 +44,12 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration) provider.S
 	}
 
 	if !config.Probe.Enabled || len(urls) == 0 {
+		// With probing disabled the search-engine evidence is all there is:
+		// record mode still submits bare endpoints so the URLs stay visible.
+		bare := bareEndpoints(urls, titles)
+		if !config.Probe.Enabled && recordUnreachable(config.Probe) {
+			return submitResults(ctx, execution, hosts, bare)
+		}
 		return submitResults(ctx, execution, hosts, nil)
 	}
 
@@ -59,44 +65,55 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration) provider.S
 		BodyLimitBytes:  config.Probe.BodyLimitKB * 1024,
 		FollowRedirects: config.Probe.FollowRedirects,
 	})
-	outcomes, unreachable := engine.ProbeAll(probeCtx, urls)
+	outcomes, unreachableURLs := engine.ProbeAll(probeCtx, urls)
 	if reportErr := execution.Progress.Report(ctx, fmt.Sprintf(
-		"probe completed ok=%d unreachable=%d", len(outcomes), unreachable)); reportErr != nil {
+		"probe completed ok=%d unreachable=%d", len(outcomes), len(unreachableURLs))); reportErr != nil {
 		return fmt.Errorf("report probe progress: %w", reportErr)
+	}
+	if recordUnreachable(config.Probe) {
+		// Search-engine indexing is itself asset evidence: record mode keeps
+		// probe-unreachable URLs as bare endpoints (empty status code marks
+		// them unverified, e.g. when the target WAF drops datacenter IPs).
+		outcomes = append(outcomes, bareEndpoints(unreachableURLs, titles)...)
+		if reportErr := execution.Progress.Report(ctx, fmt.Sprintf(
+			"probe_unreachable recorded=%d note=statusCode empty means search-indexed but unverified", len(unreachableURLs))); reportErr != nil {
+			return fmt.Errorf("report unreachable note: %w", reportErr)
+		}
 	}
 	return submitResults(ctx, execution, hosts, outcomes)
 }
 
 // harvest queries every rendered dork across the configured page budget and
 // returns deduplicated in-scope URLs and hosts.
-func harvest(ctx context.Context, search provider.SearchProvider, progress enginecontract.Progress, dorks []string, config enginecontract.DorkSearchConfig, target string) ([]string, []string, error) {
+func harvest(ctx context.Context, search provider.SearchProvider, progress enginecontract.Progress, dorks []string, config enginecontract.DorkSearchConfig, target string) ([]string, []string, map[string]string, error) {
 	urlSet := make(map[string]struct{})
 	hostSet := make(map[string]struct{})
+	titles := make(map[string]string)
 	anomalies := 0
 	outOfScope := 0
 	for _, dork := range dorks {
 		blocked := false
 		for page := 0; page < int(config.MaxPages) && !blocked; page++ {
 			if ctx.Err() != nil {
-				return nil, nil, ctx.Err()
+				return nil, nil, nil, ctx.Err()
 			}
 			first := page*int(config.PageSize) + 1
 			result, err := search.Search(ctx, dork, first, int(config.PageSize))
 			if err != nil {
 				if ctx.Err() != nil {
-					return nil, nil, ctx.Err()
+					return nil, nil, nil, ctx.Err()
 				}
 				// A failing dork must not fail the whole task; surface it and
 				// continue with the remaining templates.
 				if reportErr := progress.Report(ctx, fmt.Sprintf("dork_query error dork=%q error=%v", dork, err)); reportErr != nil {
-					return nil, nil, fmt.Errorf("report dork failure: %w", reportErr)
+					return nil, nil, nil, fmt.Errorf("report dork failure: %w", reportErr)
 				}
 				break
 			}
 			if result.Blocked {
 				blocked = true
 				if reportErr := progress.Report(ctx, fmt.Sprintf("dork_query blocked dork=%q page=%d", dork, page+1)); reportErr != nil {
-					return nil, nil, fmt.Errorf("report dork block: %w", reportErr)
+					return nil, nil, nil, fmt.Errorf("report dork block: %w", reportErr)
 				}
 				break
 			}
@@ -111,12 +128,16 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 					continue
 				}
 				hostSet[host] = struct{}{}
-				urlSet[strings.TrimSuffix(hit.URL, "/")] = struct{}{}
+				normalized := strings.TrimSuffix(hit.URL, "/")
+				urlSet[normalized] = struct{}{}
+				if hit.Title != "" {
+					titles[normalized] = hit.Title
+				}
 			}
 			anomalies += result.Anomalies
 			if reportErr := progress.Report(ctx, fmt.Sprintf(
 				"dork_query completed dork=%q page=%d hits=%d anomalies=%d", dork, page+1, len(result.Hits), result.Anomalies)); reportErr != nil {
-				return nil, nil, fmt.Errorf("report dork progress: %w", reportErr)
+				return nil, nil, nil, fmt.Errorf("report dork progress: %w", reportErr)
 			}
 			if len(result.Hits) == 0 {
 				break
@@ -125,7 +146,7 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 				select {
 				case <-time.After(delay):
 				case <-ctx.Done():
-					return nil, nil, ctx.Err()
+					return nil, nil, nil, ctx.Err()
 				}
 			}
 		}
@@ -134,10 +155,35 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 	hosts := sortedKeys(hostSet)
 	if outOfScope > 0 || anomalies > 0 {
 		if reportErr := progress.Report(ctx, fmt.Sprintf("harvest_notes outOfScope=%d anomalies=%d", outOfScope, anomalies)); reportErr != nil {
-			return nil, nil, fmt.Errorf("report harvest notes: %w", reportErr)
+			return nil, nil, nil, fmt.Errorf("report harvest notes: %w", reportErr)
 		}
 	}
-	return urls, hosts, nil
+	return urls, hosts, titles, nil
+}
+
+// recordUnreachable reports whether probe-unreachable URLs should still be
+// submitted as bare search-indexed endpoints.
+func recordUnreachable(probe enginecontract.ProbeConfig) bool {
+	return probe.UnreachablePolicy != "skip"
+}
+
+// bareEndpoints builds endpoint items that carry only search-engine
+// evidence: URL, host, and the search-result title when present. The empty
+// status code is the "unverified" marker in the asset tables.
+func bareEndpoints(urls []string, titles map[string]string) []prober.Outcome {
+	outcomes := make([]prober.Outcome, 0, len(urls))
+	for _, rawURL := range urls {
+		parsed, err := url.Parse(rawURL)
+		if err != nil || parsed.Host == "" {
+			continue
+		}
+		outcomes = append(outcomes, prober.Outcome{
+			URL:   rawURL,
+			Host:  parsed.Hostname(),
+			Title: titles[rawURL],
+		})
+	}
+	return outcomes
 }
 
 func submitResults(ctx context.Context, execution *enginecontract.Execution, hosts []string, outcomes []prober.Outcome) error {

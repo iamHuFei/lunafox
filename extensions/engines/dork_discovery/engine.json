@@ -69,6 +69,16 @@
         "defaultEnabled": true,
         "params": [
           {
+            "key": "unreachable-policy",
+            "type": "string",
+            "default": "record",
+            "enum": [
+              "record",
+              "skip"
+            ],
+            "minLength": 1
+          },
+          {
             "key": "request-timeout",
             "type": "integer",
             "default": 8,

@@ -213,10 +213,31 @@ func TestExecuteDisabledProbeStillSubmitsSubdomains(t *testing.T) {
 	if len(harness.recorder.subdomains) != 1 || harness.recorder.subdomains[0].DNSName != "api.example.com" {
 		t.Fatalf("subdomains = %+v", harness.recorder.subdomains)
 	}
-	if len(harness.recorder.endpoints) != 0 {
-		t.Fatalf("disabled probe must not submit endpoints: %+v", harness.recorder.endpoints)
+	// Default unreachable policy is record: with probing disabled the
+	// search-indexed URL still lands as a bare (unverified) endpoint.
+	if len(harness.recorder.endpoints) != 1 {
+		t.Fatalf("record policy must keep the search-indexed endpoint: %+v", harness.recorder.endpoints)
 	}
-	if !progressContains(harness.progress.messages, "result_submission completed subdomains=1 endpoints=0") {
+	bare := harness.recorder.endpoints[0]
+	if bare.URL != "https://api.example.com/login" || bare.Host != "api.example.com" || bare.StatusCode != nil {
+		t.Fatalf("bare endpoint shape wrong: %+v", bare)
+	}
+
+	skipHarness := newPipelineHarness(t, []string{"site:example.com"})
+	skipHarness.execution.Config.Probe.Enabled = false
+	skipHarness.execution.Config.Probe.UnreachablePolicy = "skip"
+	skipHarness.provider.pages["site:example.com"] = provider.Page{
+		StatusCode: 200,
+		Hits:       []provider.Hit{{URL: "https://api.example.com/login"}},
+	}
+	skipEngine := &Runtime{newProvider: func(_ time.Duration) provider.SearchProvider { return skipHarness.provider }}
+	if err := skipEngine.Execute(context.Background(), skipHarness.execution); err != nil {
+		t.Fatalf("execute skip: %v", err)
+	}
+	if len(skipHarness.recorder.endpoints) != 0 {
+		t.Fatalf("skip policy must drop unreachable endpoints: %+v", skipHarness.recorder.endpoints)
+	}
+	if !progressContains(harness.progress.messages, "result_submission completed subdomains=1 endpoints=1") {
 		t.Fatalf("progress missing submission summary: %v", harness.progress.messages)
 	}
 }
@@ -247,7 +268,7 @@ func TestExecuteFailingProviderContinuesAndReports(t *testing.T) {
 
 func harvestAndSubmit(ctx context.Context, search provider.SearchProvider, execution *enginecontract.Execution) error {
 	dorks := renderDorks(execution.Config.DorkSearch.Dorks, canonicalTargetDomain(execution.Target.Value))
-	_, hosts, err := harvest(ctx, search, execution.Progress, dorks, execution.Config.DorkSearch, canonicalTargetDomain(execution.Target.Value))
+	_, hosts, _, err := harvest(ctx, search, execution.Progress, dorks, execution.Config.DorkSearch, canonicalTargetDomain(execution.Target.Value))
 	if err != nil {
 		return err
 	}

@@ -1066,11 +1066,22 @@ func lunafoxProjectProbeConfig(section *engineexecutionpb.ConfigSection) (engine
 	var seenBodyLimitKB bool
 	var seenFollowRedirects bool
 	var seenTimeout bool
+	var seenUnreachablePolicy bool
 	for _, param := range section.GetParams() {
 		if param == nil || param.GetValue() == nil {
 			return enginecontract.ProbeConfig{}, errors.New("Engine config scalar value is required")
 		}
 		switch param.GetParamKey() {
+		case "unreachable-policy":
+			if seenUnreachablePolicy {
+				return enginecontract.ProbeConfig{}, errors.New("duplicate Engine config scalar parameter")
+			}
+			seenUnreachablePolicy = true
+			typed, ok := param.GetValue().(*engineexecutionpb.ConfigValue_StringValue)
+			if !ok {
+				return enginecontract.ProbeConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
+			}
+			projected.UnreachablePolicy = typed.StringValue
 		case "request-timeout":
 			if seenRequestTimeout {
 				return enginecontract.ProbeConfig{}, errors.New("duplicate Engine config scalar parameter")
@@ -1124,6 +1135,9 @@ func lunafoxProjectProbeConfig(section *engineexecutionpb.ConfigSection) (engine
 		default:
 			return enginecontract.ProbeConfig{}, errors.New("Engine config contains an undeclared or resource-valued scalar parameter")
 		}
+	}
+	if !seenUnreachablePolicy {
+		return enginecontract.ProbeConfig{}, errors.New("Engine config is missing a required scalar parameter")
 	}
 	if !seenRequestTimeout {
 		return enginecontract.ProbeConfig{}, errors.New("Engine config is missing a required scalar parameter")

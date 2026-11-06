@@ -38,7 +38,7 @@ func TestProbeAllKeepsOnlyRespondingURLs(t *testing.T) {
 		BodyLimitBytes:  64 << 10,
 		FollowRedirects: true,
 	})
-	live, unreachable := engine.ProbeAll(context.Background(), []string{
+	live, unreachableURLs := engine.ProbeAll(context.Background(), []string{
 		alive.URL + "/ok",
 		alive.URL + "/redirect",
 		alive.URL + "/missing",
@@ -48,8 +48,13 @@ func TestProbeAllKeepsOnlyRespondingURLs(t *testing.T) {
 	if len(live) != 3 {
 		t.Fatalf("expected 3 responding outcomes, got %+v", live)
 	}
-	if unreachable != 2 {
-		t.Fatalf("expected 2 unreachable, got %d", unreachable)
+	if len(unreachableURLs) != 2 {
+		t.Fatalf("expected 2 unreachable, got %v", unreachableURLs)
+	}
+	for _, missing := range unreachableURLs {
+		if missing != "http://127.0.0.1:1/connection-refused" && missing != "not-a-url" {
+			t.Fatalf("unexpected unreachable entry %q", missing)
+		}
 	}
 	first := live[0]
 	if first.Title != "Admin Console" || first.Webserver != "nginx" || first.ContentType != "text/html; charset=utf-8" {
