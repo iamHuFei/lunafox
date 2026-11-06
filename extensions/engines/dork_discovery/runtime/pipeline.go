@@ -13,7 +13,7 @@ import (
 	"github.com/yyhuni/lunafox/engines/dork_discovery/runtime/provider"
 )
 
-func runPipeline(ctx context.Context, newProvider func(time.Duration) provider.SearchProvider, execution *enginecontract.Execution) error {
+func runPipeline(ctx context.Context, newProvider func(time.Duration, string) provider.SearchProvider, execution *enginecontract.Execution) error {
 	config := execution.Config
 	target := canonicalTargetDomain(execution.Target.Value)
 	if target == "" {
@@ -27,7 +27,7 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration) provider.S
 		return fmt.Errorf("dork discovery requires at least one rendered dork")
 	}
 
-	search := newProvider(time.Duration(config.DorkSearch.RequestTimeout) * time.Second)
+	search := newProvider(time.Duration(config.DorkSearch.RequestTimeout)*time.Second, config.DorkSearch.ProxyURL)
 	urls, hosts, titles, searchErr := harvest(ctx, search, execution.Progress, dorks, config.DorkSearch, target)
 	if searchErr != nil {
 		return searchErr
@@ -127,7 +127,12 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 					outOfScope++
 					continue
 				}
-				hostSet[host] = struct{}{}
+				// The server-side subdomain ingestion excludes the apex
+				// target itself and escalates that item to a whole-batch
+				// PermissionDenied, so the apex never enters the host set.
+				if host != target {
+					hostSet[host] = struct{}{}
+				}
 				normalized := strings.TrimSuffix(hit.URL, "/")
 				urlSet[normalized] = struct{}{}
 				if hit.Title != "" {

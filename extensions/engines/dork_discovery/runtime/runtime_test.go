@@ -203,10 +203,11 @@ func TestExecuteDisabledProbeStillSubmitsSubdomains(t *testing.T) {
 		StatusCode: 200,
 		Hits: []provider.Hit{
 			{URL: "https://api.example.com/login"},
+			{URL: "https://example.com/apex"},
 			{URL: "https://evil.net/x"},
 		},
 	}
-	engine := &Runtime{newProvider: func(_ time.Duration) provider.SearchProvider { return harness.provider }}
+	engine := &Runtime{newProvider: func(_ time.Duration, _ string) provider.SearchProvider { return harness.provider }}
 	if err := engine.Execute(context.Background(), harness.execution); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -215,8 +216,8 @@ func TestExecuteDisabledProbeStillSubmitsSubdomains(t *testing.T) {
 	}
 	// Default unreachable policy is record: with probing disabled the
 	// search-indexed URL still lands as a bare (unverified) endpoint.
-	if len(harness.recorder.endpoints) != 1 {
-		t.Fatalf("record policy must keep the search-indexed endpoint: %+v", harness.recorder.endpoints)
+	if len(harness.recorder.endpoints) != 2 {
+		t.Fatalf("record policy must keep both search-indexed endpoints: %+v", harness.recorder.endpoints)
 	}
 	bare := harness.recorder.endpoints[0]
 	if bare.URL != "https://api.example.com/login" || bare.Host != "api.example.com" || bare.StatusCode != nil {
@@ -230,14 +231,14 @@ func TestExecuteDisabledProbeStillSubmitsSubdomains(t *testing.T) {
 		StatusCode: 200,
 		Hits:       []provider.Hit{{URL: "https://api.example.com/login"}},
 	}
-	skipEngine := &Runtime{newProvider: func(_ time.Duration) provider.SearchProvider { return skipHarness.provider }}
+	skipEngine := &Runtime{newProvider: func(_ time.Duration, _ string) provider.SearchProvider { return skipHarness.provider }}
 	if err := skipEngine.Execute(context.Background(), skipHarness.execution); err != nil {
 		t.Fatalf("execute skip: %v", err)
 	}
 	if len(skipHarness.recorder.endpoints) != 0 {
 		t.Fatalf("skip policy must drop unreachable endpoints: %+v", skipHarness.recorder.endpoints)
 	}
-	if !progressContains(harness.progress.messages, "result_submission completed subdomains=1 endpoints=1") {
+	if !progressContains(harness.progress.messages, "result_submission completed subdomains=1 endpoints=2") {
 		t.Fatalf("progress missing submission summary: %v", harness.progress.messages)
 	}
 }

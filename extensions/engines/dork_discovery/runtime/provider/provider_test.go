@@ -118,7 +118,7 @@ func TestBingProviderDetectsBlockAndServesHits(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewBingProvider(5 * time.Second)
+	provider := NewBingProvider(5*time.Second, "")
 	provider.BaseURL = server.URL
 	// Keep the warmup inside the test server; it accounts for one request.
 	provider.HomeURL = server.URL + "/"
@@ -163,7 +163,7 @@ func TestBingProviderWarmsUpCookiesAndSendsThem(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewBingProvider(5 * time.Second)
+	provider := NewBingProvider(5*time.Second, "")
 	provider.BaseURL = server.URL + "/search"
 	provider.HomeURL = server.URL + "/"
 

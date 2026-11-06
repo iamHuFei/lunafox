@@ -24,12 +24,12 @@ type ProgressReporter interface {
 // generated Engine inputs and ports; workflow state, Server repositories,
 // and Agent materialization capabilities stay outside this boundary.
 type Runtime struct {
-	newProvider func(requestTimeout time.Duration) provider.SearchProvider
+	newProvider func(requestTimeout time.Duration, proxyURL string) provider.SearchProvider
 }
 
 func New() *Runtime {
-	return &Runtime{newProvider: func(requestTimeout time.Duration) provider.SearchProvider {
-		return provider.NewBingProvider(requestTimeout)
+	return &Runtime{newProvider: func(requestTimeout time.Duration, proxyURL string) provider.SearchProvider {
+		return provider.NewBingProvider(requestTimeout, proxyURL)
 	}}
 }
 

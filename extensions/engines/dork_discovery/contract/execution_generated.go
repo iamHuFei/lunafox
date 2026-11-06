@@ -78,6 +78,8 @@ type DorkSearchConfig struct {
 	RequestTimeout int64
 	// Source: engine.json.execution.configSections["dork_search"].params["request-delay-ms"].
 	RequestDelayMS int64
+	// Source: engine.json.execution.configSections["dork_search"].params["proxy-url"].
+	ProxyURL string
 }
 
 type ProbeConfig struct {

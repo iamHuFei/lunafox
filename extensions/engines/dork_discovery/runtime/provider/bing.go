@@ -41,15 +41,24 @@ type BingProvider struct {
 	blockedOnce bool
 }
 
-func NewBingProvider(timeout time.Duration) *BingProvider {
+// NewBingProvider builds the cookie-carrying client. A non-empty proxyURL
+// (http:// or socks5://) routes both the warmup and the searches through an
+// egress proxy, which rotates the IP Bing sees when the direct address gets
+// throttled.
+func NewBingProvider(timeout time.Duration, proxyURL string) *BingProvider {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		jar = nil
 	}
+	transport := &http.Transport{}
+	if parsed, err := url.Parse(proxyURL); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https" || parsed.Scheme == "socks5") {
+		transport.Proxy = http.ProxyURL(parsed)
+	}
 	return &BingProvider{
 		Client: &http.Client{
-			Timeout: timeout,
-			Jar:     jar,
+			Timeout:   timeout,
+			Jar:       jar,
+			Transport: transport,
 			CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
 					return http.ErrUseLastResponse

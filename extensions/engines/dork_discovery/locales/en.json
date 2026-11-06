@@ -25,6 +25,9 @@
         },
         "request-delay-ms": {
           "description": "Polite delay in milliseconds between search requests"
+        },
+        "proxy-url": {
+          "description": "Egress proxy URL (http:// or socks5://, e.g. http://engine-proxy:7890). Routes Bing queries through the proxy when the direct IP is throttled; empty means direct"
         }
       }
     },

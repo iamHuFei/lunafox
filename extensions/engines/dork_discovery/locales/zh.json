@@ -25,6 +25,9 @@
         },
         "request-delay-ms": {
           "description": "相邻搜索请求之间的礼貌间隔毫秒数"
+        },
+        "proxy-url": {
+          "description": "出站代理地址（http:// 或 socks5://，如 http://engine-proxy:7890）。直连 IP 被必应风控时走代理换出口；留空直连"
         }
       }
     },

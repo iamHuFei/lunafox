@@ -61,6 +61,12 @@
             "default": 3000,
             "minimum": 0,
             "maximum": 10000
+          },
+          {
+            "key": "proxy-url",
+            "type": "string",
+            "default": "",
+            "maxLength": 300
           }
         ]
       },

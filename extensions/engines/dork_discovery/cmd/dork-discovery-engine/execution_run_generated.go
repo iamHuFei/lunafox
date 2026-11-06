@@ -960,6 +960,7 @@ func lunafoxProjectDorkSearchConfig(section *engineexecutionpb.ConfigSection) (e
 	var seenPageSize bool
 	var seenRequestTimeout bool
 	var seenRequestDelayMS bool
+	var seenProxyURL bool
 	for _, param := range section.GetParams() {
 		if param == nil || param.GetValue() == nil {
 			return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar value is required")
@@ -1025,6 +1026,16 @@ func lunafoxProjectDorkSearchConfig(section *engineexecutionpb.ConfigSection) (e
 				return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
 			}
 			projected.RequestDelayMS = typed.IntegerValue
+		case "proxy-url":
+			if seenProxyURL {
+				return enginecontract.DorkSearchConfig{}, errors.New("duplicate Engine config scalar parameter")
+			}
+			seenProxyURL = true
+			typed, ok := param.GetValue().(*engineexecutionpb.ConfigValue_StringValue)
+			if !ok {
+				return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
+			}
+			projected.ProxyURL = typed.StringValue
 		default:
 			return enginecontract.DorkSearchConfig{}, errors.New("Engine config contains an undeclared or resource-valued scalar parameter")
 		}
