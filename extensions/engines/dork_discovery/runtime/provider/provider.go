@@ -23,6 +23,11 @@ type Page struct {
 	// Anomalies counts result blocks that existed but could not be parsed;
 	// surfaced through progress so HTML drift stays observable.
 	Anomalies int
+	// NextPageURL is the pagination URL Bing itself rendered for the next
+	// page. Bing ignores bare first= offsets without the session fingerprint
+	// (FPIG) embedded in its own pager links, so pagination must follow this
+	// URL instead of rebuilding the query.
+	NextPageURL string
 }
 
 // SearchProvider queries one dork. first is the 1-based result offset and

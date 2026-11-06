@@ -93,7 +93,10 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 	outOfScope := 0
 	for _, dork := range dorks {
 		blocked := false
+		previousPageKey := ""
 		for page := 0; page < int(config.MaxPages) && !blocked; page++ {
+			pageInScope := 0
+			pageHits := make([]string, 0, 16)
 			if ctx.Err() != nil {
 				return nil, nil, nil, ctx.Err()
 			}
@@ -133,8 +136,10 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 				if host != target {
 					hostSet[host] = struct{}{}
 				}
+				pageInScope++
 				normalized := strings.TrimSuffix(hit.URL, "/")
 				urlSet[normalized] = struct{}{}
+				pageHits = append(pageHits, normalized)
 				if hit.Title != "" {
 					titles[normalized] = hit.Title
 				}
@@ -144,9 +149,23 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 				"dork_query completed dork=%q page=%d hits=%d anomalies=%d", dork, page+1, len(result.Hits), result.Anomalies)); reportErr != nil {
 				return nil, nil, nil, fmt.Errorf("report dork progress: %w", reportErr)
 			}
-			if len(result.Hits) == 0 {
+			// A page with zero in-scope hits means the dork is exhausted (or
+			// generalized); fetching further pages only burns quota.
+			if pageInScope == 0 {
 				break
 			}
+			// Bing serves cookie-less JS-less sessions the same page for every
+			// first= offset; repeating content means pagination is exhausted.
+			sort.Strings(pageHits)
+			pageKey := strings.Join(pageHits, "\x00")
+			if pageKey == previousPageKey {
+				if reportErr := progress.Report(ctx, fmt.Sprintf(
+					"dork_query repeated dork=%q page=%d; pagination exhausted", dork, page+1)); reportErr != nil {
+					return nil, nil, nil, fmt.Errorf("report repeat note: %w", reportErr)
+				}
+				break
+			}
+			previousPageKey = pageKey
 			if delay := time.Duration(config.RequestDelayMS) * time.Millisecond; delay > 0 {
 				select {
 				case <-time.After(delay):

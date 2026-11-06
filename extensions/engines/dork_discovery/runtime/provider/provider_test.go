@@ -178,3 +178,25 @@ func TestBingProviderWarmsUpCookiesAndSendsThem(t *testing.T) {
 		t.Fatalf("hits missing")
 	}
 }
+
+func TestParseBingNextPageURLFromLivePage(t *testing.T) {
+	next := ParseBingNextPageURL(loadFixture(t, "bing-site-results.html"))
+	if next == "" {
+		t.Fatalf("live results page should expose a next-page link (FPIG fingerprint)")
+	}
+	if !strings.Contains(next, "first=") {
+		t.Fatalf("next-page link must carry the first offset: %q", next)
+	}
+	if !strings.Contains(next, "FPIG=") {
+		t.Fatalf("next-page link should carry the session fingerprint: %q", next)
+	}
+}
+
+func TestParseBingNextPageURLEmptyOnNoPager(t *testing.T) {
+	if next := ParseBingNextPageURL(loadFixture(t, "bing-captcha.html")); next != "" {
+		t.Fatalf("captcha page must not expose pagination: %q", next)
+	}
+	if next := ParseBingNextPageURL(loadFixture(t, "bing-ck-redirect.html")); next != "" {
+		t.Fatalf("synthetic page has no pager: %q", next)
+	}
+}

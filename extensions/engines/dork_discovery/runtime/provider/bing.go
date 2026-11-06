@@ -39,6 +39,10 @@ type BingProvider struct {
 	// hitting the endpoint, because hammering through a challenge deepens
 	// the throttle instead of clearing it.
 	blockedOnce bool
+	// Pagination state: the last query and the pager URL Bing rendered for
+	// its next page (FPIG-fingerprinted). Sequential per-dork paging only.
+	lastQuery   string
+	lastNextURL string
 }
 
 // NewBingProvider builds the cookie-carrying client. A non-empty proxyURL
@@ -123,6 +127,16 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 		"count":    {fmt.Sprintf("%d", count)},
 		"first":    {fmt.Sprintf("%d", first)},
 	}.Encode()
+	// Pagination follows Bing's own pager link (with the FPIG fingerprint):
+	// a rebuilt first= offset silently repeats page one. The pager href is
+	// relative (/search?...), so it resolves against the Bing host.
+	if first > 1 && provider.lastQuery == query && provider.lastNextURL != "" {
+		if base, baseErr := url.Parse("https://www.bing.com"); baseErr == nil {
+			if absolute, absErr := base.Parse(provider.lastNextURL); absErr == nil && absolute.IsAbs() {
+				endpoint = absolute.String()
+			}
+		}
+	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -162,5 +176,13 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 	}
 	page.Hits = hits
 	page.Anomalies = anomalies
+	if nextURL := ParseBingNextPageURL(bodyText); nextURL != "" {
+		page.NextPageURL = nextURL
+		provider.lastQuery = query
+		provider.lastNextURL = nextURL
+	} else {
+		provider.lastQuery = ""
+		provider.lastNextURL = ""
+	}
 	return page, nil
 }

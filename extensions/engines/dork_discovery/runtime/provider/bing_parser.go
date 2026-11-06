@@ -30,6 +30,38 @@ func ParseBingResults(body string) ([]Hit, int) {
 	return hits, anomalies
 }
 
+// ParseBingNextPageURL extracts the pagination href Bing rendered for the
+// next page (carrying the FPIG session fingerprint). Empty when the page has
+// no further results.
+func ParseBingNextPageURL(body string) string {
+	root, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	var nextURL string
+	for _, node := range findNodes(root, func(node *html.Node) bool {
+		return node.Type == html.ElementNode && node.Data == "a"
+	}) {
+		href := attrValue(node, "href")
+		if href == "" {
+			continue
+		}
+		parsed, err := url.Parse(href)
+		if err != nil || !strings.HasPrefix(parsed.Path, "/search") {
+			continue
+		}
+		query := parsed.Query()
+		first, hasFirst := query["first"]
+		if !hasFirst || len(first) == 0 || first[0] == "1" {
+			continue
+		}
+		if nextURL == "" {
+			nextURL = href
+		}
+	}
+	return nextURL
+}
+
 func isBingResultBlock(node *html.Node) bool {
 	return node.Type == html.ElementNode && node.Data == "li" && hasTokenInClass(node, "b_algo")
 }
