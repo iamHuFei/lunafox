@@ -39,7 +39,7 @@
           "description": "Maximum Wayback URLs to keep (most recently archived first); 0 = unlimited. 200-500 suits deep archives"
         },
         "wayback-max-age-years": {
-          "description": "Only keep URLs archived within the last N years; 0 = unlimited (keeps legacy paths too)"
+          "description": "Only keep URLs archived within the last N years, default 3 (stale paths are mostly dead; raise or set 0 when hunting legacy interfaces)"
         }
       }
     },
