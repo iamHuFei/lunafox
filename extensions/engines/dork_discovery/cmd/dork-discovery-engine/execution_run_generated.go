@@ -955,6 +955,7 @@ func lunafoxProjectDorkSearchConfig(section *engineexecutionpb.ConfigSection) (e
 		return projected, nil
 	}
 	var seenDorks bool
+	var seenUseBrowser bool
 	var seenProvider bool
 	var seenMaxPages bool
 	var seenPageSize bool
@@ -966,6 +967,16 @@ func lunafoxProjectDorkSearchConfig(section *engineexecutionpb.ConfigSection) (e
 			return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar value is required")
 		}
 		switch param.GetParamKey() {
+		case "use-browser":
+			if seenUseBrowser {
+				return enginecontract.DorkSearchConfig{}, errors.New("duplicate Engine config scalar parameter")
+			}
+			seenUseBrowser = true
+			typed, ok := param.GetValue().(*engineexecutionpb.ConfigValue_BooleanValue)
+			if !ok {
+				return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
+			}
+			projected.UseBrowser = typed.BooleanValue
 		case "dorks":
 			if seenDorks {
 				return enginecontract.DorkSearchConfig{}, errors.New("duplicate Engine config scalar parameter")
@@ -1039,6 +1050,9 @@ func lunafoxProjectDorkSearchConfig(section *engineexecutionpb.ConfigSection) (e
 		default:
 			return enginecontract.DorkSearchConfig{}, errors.New("Engine config contains an undeclared or resource-valued scalar parameter")
 		}
+	}
+	if !seenUseBrowser {
+		return enginecontract.DorkSearchConfig{}, errors.New("Engine config is missing a required scalar parameter")
 	}
 	if !seenDorks {
 		return enginecontract.DorkSearchConfig{}, errors.New("Engine config is missing a required scalar parameter")

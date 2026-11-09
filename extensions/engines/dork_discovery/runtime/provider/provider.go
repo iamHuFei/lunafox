@@ -7,10 +7,14 @@ package provider
 
 import "context"
 
-// Hit is one organic result extracted from a search page.
+// Hit is one organic result extracted from a search page. Date and Snippet
+// carry the crawl-date badge and the result summary Bing renders beside each
+// organic entry; they become search-engine evidence in the submitted assets.
 type Hit struct {
-	URL   string
-	Title string
+	URL     string
+	Title   string
+	Date    string
+	Snippet string
 }
 
 // Page is one fetched result page. Blocked reports provider-side throttling
@@ -35,4 +39,12 @@ type Page struct {
 type SearchProvider interface {
 	Name() string
 	Search(ctx context.Context, query string, first, count int) (Page, error)
+}
+
+// CloseIfCloser releases providers that hold OS resources (the headless
+// browser); plain HTTP providers need no teardown.
+func CloseIfCloser(searchProvider SearchProvider) {
+	if closer, ok := searchProvider.(interface{ Close() }); ok {
+		closer.Close()
+	}
 }

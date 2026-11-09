@@ -68,6 +68,8 @@ type DorkSearchConfig struct {
 	Enabled bool
 	// Source: engine.json.execution.configSections["dork_search"].params["dorks"].
 	Dorks []string
+	// Source: engine.json.execution.configSections["dork_search"].params["use-browser"].
+	UseBrowser bool
 	// Source: engine.json.execution.configSections["dork_search"].params["provider"].
 	Provider string
 	// Source: engine.json.execution.configSections["dork_search"].params["max-pages"].

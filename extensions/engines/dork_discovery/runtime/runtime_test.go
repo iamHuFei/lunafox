@@ -207,7 +207,7 @@ func TestExecuteDisabledProbeStillSubmitsSubdomains(t *testing.T) {
 			{URL: "https://evil.net/x"},
 		},
 	}
-	engine := &Runtime{newProvider: func(_ time.Duration, _ string) provider.SearchProvider { return harness.provider }}
+	engine := &Runtime{newProvider: func(_ time.Duration, _ string, _ bool) provider.SearchProvider { return harness.provider }}
 	if err := engine.Execute(context.Background(), harness.execution); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestExecuteDisabledProbeStillSubmitsSubdomains(t *testing.T) {
 		StatusCode: 200,
 		Hits:       []provider.Hit{{URL: "https://api.example.com/login"}},
 	}
-	skipEngine := &Runtime{newProvider: func(_ time.Duration, _ string) provider.SearchProvider { return skipHarness.provider }}
+	skipEngine := &Runtime{newProvider: func(_ time.Duration, _ string, _ bool) provider.SearchProvider { return skipHarness.provider }}
 	if err := skipEngine.Execute(context.Background(), skipHarness.execution); err != nil {
 		t.Fatalf("execute skip: %v", err)
 	}
@@ -269,11 +269,11 @@ func TestExecuteFailingProviderContinuesAndReports(t *testing.T) {
 
 func harvestAndSubmit(ctx context.Context, search provider.SearchProvider, execution *enginecontract.Execution) error {
 	dorks := renderDorks(execution.Config.DorkSearch.Dorks, canonicalTargetDomain(execution.Target.Value))
-	_, hosts, _, err := harvest(ctx, search, execution.Progress, dorks, execution.Config.DorkSearch, canonicalTargetDomain(execution.Target.Value))
+	_, hosts, _, _, err := harvest(ctx, search, execution.Progress, dorks, execution.Config.DorkSearch, canonicalTargetDomain(execution.Target.Value))
 	if err != nil {
 		return err
 	}
-	return submitResults(ctx, execution, hosts, nil)
+	return submitResults(ctx, execution, hosts, nil, nil)
 }
 
 func TestWorkspaceValidationCoversFileWorkspace(t *testing.T) {

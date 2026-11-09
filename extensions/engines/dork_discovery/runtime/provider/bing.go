@@ -43,6 +43,10 @@ type BingProvider struct {
 	// its next page (FPIG-fingerprinted). Sequential per-dork paging only.
 	lastQuery   string
 	lastNextURL string
+	// rdrParams carries the rdr=1&rdrig=<guid> redirect fingerprint Bing set
+	// when redirecting the first search. Without it every first= offset
+	// repeats page one even with the FPIG pager link.
+	rdrParams url.Values
 }
 
 // NewBingProvider builds the cookie-carrying client. A non-empty proxyURL
@@ -129,10 +133,20 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 	}.Encode()
 	// Pagination follows Bing's own pager link (with the FPIG fingerprint):
 	// a rebuilt first= offset silently repeats page one. The pager href is
-	// relative (/search?...), so it resolves against the Bing host.
+	// relative (/search?...), so it resolves against the Bing host, and the
+	// rdr/rdrig redirect fingerprint joins the query.
 	if first > 1 && provider.lastQuery == query && provider.lastNextURL != "" {
 		if base, baseErr := url.Parse("https://www.bing.com"); baseErr == nil {
 			if absolute, absErr := base.Parse(provider.lastNextURL); absErr == nil && absolute.IsAbs() {
+				if provider.rdrParams != nil {
+					queryValues := absolute.Query()
+					for key := range provider.rdrParams {
+						if queryValues.Get(key) == "" {
+							queryValues.Set(key, provider.rdrParams.Get(key))
+						}
+					}
+					absolute.RawQuery = queryValues.Encode()
+				}
 				endpoint = absolute.String()
 			}
 		}
@@ -152,6 +166,17 @@ func (provider *BingProvider) Search(ctx context.Context, query string, first, c
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
 		return Page{}, fmt.Errorf("read bing response: %w", err)
+	}
+	// Bing 302s the first search to a URL carrying rdr=1&rdrig=<guid>; that
+	// fingerprint is what makes later first= offsets advance pages.
+	if effective := response.Request.URL; effective != nil {
+		query := effective.Query()
+		if query.Get("rdr") == "1" || query.Get("rdrig") != "" {
+			provider.rdrParams = url.Values{
+				"rdr":   {"1"},
+				"rdrig": {query.Get("rdrig")},
+			}
+		}
 	}
 	page := Page{StatusCode: response.StatusCode}
 	bodyText := string(body)

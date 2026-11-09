@@ -100,7 +100,24 @@ func parseBingResultBlock(block *html.Node) (Hit, bool) {
 	if isBingSelfLink(parsed) {
 		return Hit{}, false
 	}
-	return Hit{URL: parsed.String(), Title: strings.TrimSpace(title)}, true
+	hit := Hit{URL: parsed.String(), Title: strings.TrimSpace(title)}
+	// Crawl-date badge (e.g. <span class="news_dt">2024/5/12</span>) and the
+	// caption summary paragraph below the heading.
+	if date := findFirst(block, func(node *html.Node) bool {
+		return node.Type == html.ElementNode && node.Data == "span" && hasTokenInClass(node, "news_dt")
+	}); date != nil {
+		hit.Date = strings.TrimSpace(nodeText(date))
+	}
+	if caption := findFirst(block, func(node *html.Node) bool {
+		return node.Type == html.ElementNode && (node.Data == "p") && hasTokenInClass(node, "b_lineclamp2")
+	}); caption != nil {
+		summary := strings.Join(strings.Fields(nodeText(caption)), " ")
+		if len(summary) > 600 {
+			summary = summary[:600]
+		}
+		hit.Snippet = summary
+	}
+	return hit, true
 }
 
 // resolveBingURL unwraps Bing's click-tracking redirects. Bing wraps outbound

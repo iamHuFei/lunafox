@@ -13,7 +13,7 @@ import (
 	"github.com/yyhuni/lunafox/engines/dork_discovery/runtime/provider"
 )
 
-func runPipeline(ctx context.Context, newProvider func(time.Duration, string) provider.SearchProvider, execution *enginecontract.Execution) error {
+func runPipeline(ctx context.Context, newProvider func(time.Duration, string, bool) provider.SearchProvider, execution *enginecontract.Execution) error {
 	config := execution.Config
 	target := canonicalTargetDomain(execution.Target.Value)
 	if target == "" {
@@ -27,8 +27,9 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration, string) pr
 		return fmt.Errorf("dork discovery requires at least one rendered dork")
 	}
 
-	search := newProvider(time.Duration(config.DorkSearch.RequestTimeout)*time.Second, config.DorkSearch.ProxyURL)
-	urls, hosts, titles, searchErr := harvest(ctx, search, execution.Progress, dorks, config.DorkSearch, target)
+	search := newProvider(time.Duration(config.DorkSearch.RequestTimeout)*time.Second, config.DorkSearch.ProxyURL, config.DorkSearch.UseBrowser)
+	defer provider.CloseIfCloser(search)
+	urls, hosts, titles, snippets, searchErr := harvest(ctx, search, execution.Progress, dorks, config.DorkSearch, target)
 	if searchErr != nil {
 		return searchErr
 	}
@@ -48,9 +49,9 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration, string) pr
 		// record mode still submits bare endpoints so the URLs stay visible.
 		bare := bareEndpoints(urls, titles)
 		if !config.Probe.Enabled && recordUnreachable(config.Probe) {
-			return submitResults(ctx, execution, hosts, bare)
+			return submitResults(ctx, execution, hosts, bare, snippets)
 		}
-		return submitResults(ctx, execution, hosts, nil)
+		return submitResults(ctx, execution, hosts, nil, snippets)
 	}
 
 	probeBudget := time.Duration(config.Probe.Timeout) * time.Second
@@ -80,15 +81,16 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration, string) pr
 			return fmt.Errorf("report unreachable note: %w", reportErr)
 		}
 	}
-	return submitResults(ctx, execution, hosts, outcomes)
+	return submitResults(ctx, execution, hosts, outcomes, snippets)
 }
 
 // harvest queries every rendered dork across the configured page budget and
 // returns deduplicated in-scope URLs and hosts.
-func harvest(ctx context.Context, search provider.SearchProvider, progress enginecontract.Progress, dorks []string, config enginecontract.DorkSearchConfig, target string) ([]string, []string, map[string]string, error) {
+func harvest(ctx context.Context, search provider.SearchProvider, progress enginecontract.Progress, dorks []string, config enginecontract.DorkSearchConfig, target string) ([]string, []string, map[string]string, map[string]string, error) {
 	urlSet := make(map[string]struct{})
 	hostSet := make(map[string]struct{})
 	titles := make(map[string]string)
+	snippets := make(map[string]string)
 	anomalies := 0
 	outOfScope := 0
 	for _, dork := range dorks {
@@ -98,25 +100,25 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 			pageInScope := 0
 			pageHits := make([]string, 0, 16)
 			if ctx.Err() != nil {
-				return nil, nil, nil, ctx.Err()
+				return nil, nil, nil, nil, ctx.Err()
 			}
 			first := page*int(config.PageSize) + 1
 			result, err := search.Search(ctx, dork, first, int(config.PageSize))
 			if err != nil {
 				if ctx.Err() != nil {
-					return nil, nil, nil, ctx.Err()
+					return nil, nil, nil, nil, ctx.Err()
 				}
 				// A failing dork must not fail the whole task; surface it and
 				// continue with the remaining templates.
 				if reportErr := progress.Report(ctx, fmt.Sprintf("dork_query error dork=%q error=%v", dork, err)); reportErr != nil {
-					return nil, nil, nil, fmt.Errorf("report dork failure: %w", reportErr)
+					return nil, nil, nil, nil, fmt.Errorf("report dork failure: %w", reportErr)
 				}
 				break
 			}
 			if result.Blocked {
 				blocked = true
 				if reportErr := progress.Report(ctx, fmt.Sprintf("dork_query blocked dork=%q page=%d", dork, page+1)); reportErr != nil {
-					return nil, nil, nil, fmt.Errorf("report dork block: %w", reportErr)
+					return nil, nil, nil, nil, fmt.Errorf("report dork block: %w", reportErr)
 				}
 				break
 			}
@@ -143,11 +145,14 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 				if hit.Title != "" {
 					titles[normalized] = hit.Title
 				}
+				if evidence := searchEvidence(hit); evidence != "" {
+					snippets[normalized] = evidence
+				}
 			}
 			anomalies += result.Anomalies
 			if reportErr := progress.Report(ctx, fmt.Sprintf(
 				"dork_query completed dork=%q page=%d hits=%d anomalies=%d", dork, page+1, len(result.Hits), result.Anomalies)); reportErr != nil {
-				return nil, nil, nil, fmt.Errorf("report dork progress: %w", reportErr)
+				return nil, nil, nil, nil, fmt.Errorf("report dork progress: %w", reportErr)
 			}
 			// A page with zero in-scope hits means the dork is exhausted (or
 			// generalized); fetching further pages only burns quota.
@@ -161,7 +166,7 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 			if pageKey == previousPageKey {
 				if reportErr := progress.Report(ctx, fmt.Sprintf(
 					"dork_query repeated dork=%q page=%d; pagination exhausted", dork, page+1)); reportErr != nil {
-					return nil, nil, nil, fmt.Errorf("report repeat note: %w", reportErr)
+					return nil, nil, nil, nil, fmt.Errorf("report repeat note: %w", reportErr)
 				}
 				break
 			}
@@ -170,7 +175,7 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 				select {
 				case <-time.After(delay):
 				case <-ctx.Done():
-					return nil, nil, nil, ctx.Err()
+					return nil, nil, nil, nil, ctx.Err()
 				}
 			}
 		}
@@ -179,10 +184,26 @@ func harvest(ctx context.Context, search provider.SearchProvider, progress engin
 	hosts := sortedKeys(hostSet)
 	if outOfScope > 0 || anomalies > 0 {
 		if reportErr := progress.Report(ctx, fmt.Sprintf("harvest_notes outOfScope=%d anomalies=%d", outOfScope, anomalies)); reportErr != nil {
-			return nil, nil, nil, fmt.Errorf("report harvest notes: %w", reportErr)
+			return nil, nil, nil, nil, fmt.Errorf("report harvest notes: %w", reportErr)
 		}
 	}
-	return urls, hosts, titles, nil
+	return urls, hosts, titles, snippets, nil
+}
+
+// searchEvidence renders the crawl-date badge and result summary Bing showed
+// beside the hit, e.g. "[bing 2024/5/12] 描述文本".
+func searchEvidence(hit provider.Hit) string {
+	parts := make([]string, 0, 2)
+	if hit.Date != "" {
+		parts = append(parts, hit.Date)
+	}
+	if hit.Snippet != "" {
+		parts = append(parts, hit.Snippet)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[bing " + strings.Join(parts, "] [") + "]"
 }
 
 // recordUnreachable reports whether probe-unreachable URLs should still be
@@ -210,11 +231,11 @@ func bareEndpoints(urls []string, titles map[string]string) []prober.Outcome {
 	return outcomes
 }
 
-func submitResults(ctx context.Context, execution *enginecontract.Execution, hosts []string, outcomes []prober.Outcome) error {
+func submitResults(ctx context.Context, execution *enginecontract.Execution, hosts []string, outcomes []prober.Outcome, snippets map[string]string) error {
 	if err := submitSubdomains(ctx, execution, hosts); err != nil {
 		return err
 	}
-	if err := submitEndpoints(ctx, execution, outcomes); err != nil {
+	if err := submitEndpoints(ctx, execution, outcomes, snippets); err != nil {
 		return err
 	}
 	return execution.Progress.Report(ctx, fmt.Sprintf(
@@ -245,7 +266,7 @@ func submitSubdomains(ctx context.Context, execution *enginecontract.Execution, 
 	return nil
 }
 
-func submitEndpoints(ctx context.Context, execution *enginecontract.Execution, outcomes []prober.Outcome) error {
+func submitEndpoints(ctx context.Context, execution *enginecontract.Execution, outcomes []prober.Outcome, snippets map[string]string) error {
 	if len(outcomes) == 0 {
 		return nil
 	}
@@ -266,6 +287,9 @@ func submitEndpoints(ctx context.Context, execution *enginecontract.Execution, o
 		}
 		if outcome.Title != "" {
 			item.Title = outcome.Title
+		}
+		if snippets[outcome.URL] != "" {
+			item.ResponseBody = snippets[outcome.URL]
 		}
 		select {
 		case items <- item:
