@@ -33,7 +33,7 @@
           "description": "Run Bing queries inside a headless browser (pagination needs a browser-session fingerprint). Falls back to HTTP when no browser binary ships in the image; Bing throttles pagination from datacenter IPs, residential egress works best"
         },
         "wayback": {
-          "description": "Merge the Wayback Machine index as the historical-depth URL source: one CDX dump for the target domain (subdomains included), static assets and archived-404s dropped, recency-sorted; URL-level dedup against Bing results; responseBody carries a [wayback date archived status] annotation. web.archive.org goes through proxy-url"
+          "description": "Merge the Wayback Machine index as an extra URL source (off by default: stale paths are mostly dead). When on, one CDX dump per target with static/404 filtering and recency ordering"
         },
         "wayback-limit": {
           "description": "Maximum Wayback URLs to keep (most recently archived first); 0 = unlimited. 200-500 suits deep archives"

@@ -76,7 +76,7 @@
           {
             "key": "wayback",
             "type": "boolean",
-            "default": true
+            "default": false
           },
           {
             "key": "wayback-limit",
