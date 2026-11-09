@@ -82,6 +82,12 @@ type DorkSearchConfig struct {
 	RequestDelayMS int64
 	// Source: engine.json.execution.configSections["dork_search"].params["proxy-url"].
 	ProxyURL string
+	// Source: engine.json.execution.configSections["dork_search"].params["wayback"].
+	Wayback bool
+	// Source: engine.json.execution.configSections["dork_search"].params["wayback-limit"].
+	WaybackLimit int64
+	// Source: engine.json.execution.configSections["dork_search"].params["wayback-max-age-years"].
+	WaybackMaxAgeYears int64
 }
 
 type ProbeConfig struct {

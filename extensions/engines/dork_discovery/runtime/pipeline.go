@@ -38,6 +38,26 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration, string, bo
 		return fmt.Errorf("report harvest progress: %w", reportErr)
 	}
 
+	// The Wayback merge is the historical-depth source: one CDX dump per
+	// target, gated (static assets and archived-404s dropped, recency-sorted,
+	// capped) and deduped against the search-engine URLs at no extra cost.
+	urls, snippets, waybackHosts, waybackErr := mergeWayback(ctx, execution, config, target, urls, snippets)
+	if waybackErr != nil {
+		if reportErr := execution.Progress.Report(ctx, fmt.Sprintf("wayback error=%v", waybackErr)); reportErr != nil {
+			return fmt.Errorf("report wayback failure: %w", reportErr)
+		}
+	} else if waybackHosts != nil {
+		for host := range waybackHosts {
+			if !strings.HasPrefix(host, "__") && host != target {
+				hosts = appendUniqueHost(hosts, host)
+			}
+		}
+		if reportErr := execution.Progress.Report(ctx, fmt.Sprintf(
+			"wayback completed kept=%s added=%s totalUrls=%d", waybackHosts["__kept__"], waybackHosts["__added__"], len(urls))); reportErr != nil {
+			return fmt.Errorf("report wayback progress: %w", reportErr)
+		}
+	}
+
 	// An IP target has no subdomain namespace; hosts would all equal the
 	// target address, which server-side subdomain ingestion would reject.
 	if IsIPTarget(target) {
@@ -65,6 +85,9 @@ func runPipeline(ctx context.Context, newProvider func(time.Duration, string, bo
 		RequestTimeout:  time.Duration(config.Probe.RequestTimeout) * time.Second,
 		BodyLimitBytes:  config.Probe.BodyLimitKB * 1024,
 		FollowRedirects: config.Probe.FollowRedirects,
+		// Probe vantage fallback: direct first, proxy retry when the direct
+		// path is blocked, so datacenter-hostile targets still verify.
+		ProxyURL: config.DorkSearch.ProxyURL,
 	})
 	outcomes, unreachableURLs := engine.ProbeAll(probeCtx, urls)
 	if reportErr := execution.Progress.Report(ctx, fmt.Sprintf(
@@ -303,6 +326,54 @@ func submitEndpoints(ctx context.Context, execution *enginecontract.Execution, o
 		return fmt.Errorf("submit endpoints: %w", err)
 	}
 	return nil
+}
+
+// mergeWayback fetches the gated Wayback CDX entries for the target and
+// merges them into the URL and snippet maps. Search-engine URLs win: an
+// archive URL already present keeps its live snippet.
+func mergeWayback(ctx context.Context, execution *enginecontract.Execution, config enginecontract.Config, target string, urls []string, snippets map[string]string) ([]string, map[string]string, map[string]string, error) {
+	if !config.DorkSearch.Wayback {
+		return urls, snippets, nil, nil
+	}
+	entries, err := provider.FetchWaybackURLs(ctx, target, config.DorkSearch.ProxyURL,
+		int(config.DorkSearch.WaybackLimit), int(config.DorkSearch.WaybackMaxAgeYears), time.Now())
+	if err != nil {
+		return urls, snippets, nil, err
+	}
+	known := make(map[string]struct{}, len(urls))
+	for _, existing := range urls {
+		known[existing] = struct{}{}
+	}
+	hosts := make(map[string]string)
+	merged := make([]string, 0, len(urls)+len(entries))
+	merged = append(merged, urls...)
+	added := 0
+	for _, entry := range entries {
+		if _, duplicate := known[entry.URL]; duplicate {
+			continue
+		}
+		known[entry.URL] = struct{}{}
+		merged = append(merged, entry.URL)
+		if _, hasSnippet := snippets[entry.URL]; !hasSnippet {
+			snippets[entry.URL] = fmt.Sprintf("[wayback %s archived %s]", entry.LastSeenHuman(), entry.ArchivedStatus)
+		}
+		if parsed, parseErr := url.Parse(entry.URL); parseErr == nil && parsed.Host != "" {
+			hosts[parsed.Hostname()] = entry.URL
+		}
+		added++
+	}
+	hosts["__added__"] = fmt.Sprintf("%d", added)
+	hosts["__kept__"] = fmt.Sprintf("%d", len(entries))
+	return merged, snippets, hosts, nil
+}
+
+func appendUniqueHost(hosts []string, host string) []string {
+	for _, existing := range hosts {
+		if existing == host {
+			return hosts
+		}
+	}
+	return append(hosts, host)
 }
 
 func renderDorks(templates []string, target string) []string {

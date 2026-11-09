@@ -962,6 +962,9 @@ func lunafoxProjectDorkSearchConfig(section *engineexecutionpb.ConfigSection) (e
 	var seenRequestTimeout bool
 	var seenRequestDelayMS bool
 	var seenProxyURL bool
+	var seenWayback bool
+	var seenWaybackLimit bool
+	var seenWaybackMaxAgeYears bool
 	for _, param := range section.GetParams() {
 		if param == nil || param.GetValue() == nil {
 			return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar value is required")
@@ -1037,6 +1040,36 @@ func lunafoxProjectDorkSearchConfig(section *engineexecutionpb.ConfigSection) (e
 				return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
 			}
 			projected.RequestDelayMS = typed.IntegerValue
+		case "wayback":
+			if seenWayback {
+				return enginecontract.DorkSearchConfig{}, errors.New("duplicate Engine config scalar parameter")
+			}
+			seenWayback = true
+			typed, ok := param.GetValue().(*engineexecutionpb.ConfigValue_BooleanValue)
+			if !ok {
+				return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
+			}
+			projected.Wayback = typed.BooleanValue
+		case "wayback-limit":
+			if seenWaybackLimit {
+				return enginecontract.DorkSearchConfig{}, errors.New("duplicate Engine config scalar parameter")
+			}
+			seenWaybackLimit = true
+			typed, ok := param.GetValue().(*engineexecutionpb.ConfigValue_IntegerValue)
+			if !ok {
+				return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
+			}
+			projected.WaybackLimit = typed.IntegerValue
+		case "wayback-max-age-years":
+			if seenWaybackMaxAgeYears {
+				return enginecontract.DorkSearchConfig{}, errors.New("duplicate Engine config scalar parameter")
+			}
+			seenWaybackMaxAgeYears = true
+			typed, ok := param.GetValue().(*engineexecutionpb.ConfigValue_IntegerValue)
+			if !ok {
+				return enginecontract.DorkSearchConfig{}, errors.New("Engine config scalar type does not match the Engine Definition")
+			}
+			projected.WaybackMaxAgeYears = typed.IntegerValue
 		case "proxy-url":
 			if seenProxyURL {
 				return enginecontract.DorkSearchConfig{}, errors.New("duplicate Engine config scalar parameter")

@@ -72,6 +72,25 @@
             "type": "string",
             "default": "",
             "maxLength": 300
+          },
+          {
+            "key": "wayback",
+            "type": "boolean",
+            "default": true
+          },
+          {
+            "key": "wayback-limit",
+            "type": "integer",
+            "default": 200,
+            "minimum": 0,
+            "maximum": 2000
+          },
+          {
+            "key": "wayback-max-age-years",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 20
           }
         ]
       },

@@ -31,6 +31,15 @@
         },
         "use-browser": {
           "description": "在无头浏览器中执行必应查询（翻页需要浏览器会话指纹）。注意：浏览器二进制未随镜像分发时自动回退 HTTP 模式；必应对机房 IP 的翻页有反爬限制，居家/办公出口 IP 更可能生效"
+        },
+        "wayback": {
+          "description": "合并 Wayback Machine 历史索引作为 URL 深度源:一次 CDX 查询拿目标域(含子域)全量历史路径,自动丢弃静态资源(css/js/图片)与归档时已 404 的条目,按最后归档时间倒序;与必应结果 URL 级去重;资产响应体标注 [wayback 日期 archived 状态]。web.archive.org 走 proxy-url 出口"
+        },
+        "wayback-limit": {
+          "description": "Wayback 最多保留的 URL 数(按最新归档优先截断);0=不限制。历史深库目标建议 200-500"
+        },
+        "wayback-max-age-years": {
+          "description": "只保留最近 N 年内有归档记录的 URL;0=不限制(保留全部历史路径,含遗留接口)"
         }
       }
     },

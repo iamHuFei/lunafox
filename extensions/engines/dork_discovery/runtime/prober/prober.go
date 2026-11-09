@@ -16,12 +16,16 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Options bounds one probe batch.
+// Options bounds one probe batch. ProxyURL (http:// or socks5://), when set,
+// is a fallback vantage: a URL that fails the direct attempt is retried once
+// through the proxy, which turns "unreachable" (datacenter-blocked or
+// geo-blocked targets) into a verified HTTP response such as a WAF challenge.
 type Options struct {
 	Concurrency     int
 	RequestTimeout  time.Duration
 	BodyLimitBytes  int64
 	FollowRedirects bool
+	ProxyURL        string
 }
 
 // Outcome is the probe result for one URL. It exists only for URLs that
@@ -40,6 +44,8 @@ type Outcome struct {
 type Prober struct {
 	clientNoRedirect *http.Client
 	clientFollow     *http.Client
+	proxyNoRedirect  *http.Client
+	proxyFollow      *http.Client
 	options          Options
 }
 
@@ -65,11 +71,17 @@ func New(options Options) *Prober {
 		}
 		return nil
 	}
-	return &Prober{
+	prober := &Prober{
 		clientNoRedirect: newClient(stopImmediately),
 		clientFollow:     newClient(followUpToTen),
 		options:          options,
 	}
+	if parsed, err := url.Parse(options.ProxyURL); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https" || parsed.Scheme == "socks5") {
+		proxied := &http.Transport{Proxy: http.ProxyURL(parsed)}
+		prober.proxyNoRedirect = &http.Client{Timeout: options.RequestTimeout, Transport: proxied, CheckRedirect: stopImmediately}
+		prober.proxyFollow = &http.Client{Timeout: options.RequestTimeout, Transport: proxied, CheckRedirect: followUpToTen}
+	}
+	return prober
 }
 
 // ProbeAll probes URLs with a bounded worker pool and returns the outcomes
@@ -82,6 +94,12 @@ func (prober *Prober) ProbeAll(ctx context.Context, urls []string) ([]Outcome, [
 	results := make([]Outcome, len(urls))
 	responded := make([]bool, len(urls))
 	semaphore := make(chan struct{}, prober.options.Concurrency)
+	// Hosts whose direct attempts keep timing out (datacenter-blocked or
+	// geo-blocked targets) stop wasting a full request timeout per URL: after
+	// two consecutive direct failures the host probes proxy-first for the
+	// rest of the batch.
+	directFailures := make(map[string]int)
+	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for index, candidate := range urls {
 		wg.Add(1)
@@ -93,7 +111,39 @@ func (prober *Prober) ProbeAll(ctx context.Context, urls []string) ([]Outcome, [
 				return
 			}
 			defer func() { <-semaphore }()
-			outcome, ok := prober.probeOne(ctx, candidate)
+			parsed, parseErr := url.Parse(candidate)
+			if parseErr != nil {
+				return
+			}
+			host := parsed.Hostname()
+			mu.Lock()
+			skipDirect := directFailures[host] >= 2
+			mu.Unlock()
+
+			var outcome Outcome
+			var ok bool
+			if skipDirect {
+				outcome, ok = prober.probeOne(ctx, prober.proxyFollow, prober.proxyNoRedirect, candidate)
+				if !ok {
+					outcome, ok = prober.probeOne(ctx, prober.clientFollow, prober.clientNoRedirect, candidate)
+				}
+			} else {
+				outcome, ok = prober.probeOne(ctx, prober.clientFollow, prober.clientNoRedirect, candidate)
+				if !ok && prober.proxyFollow != nil {
+					// Direct attempt failed at the transport level; a proxied
+					// retry can still reach datacenter-blocked targets.
+					outcome, ok = prober.probeOne(ctx, prober.proxyFollow, prober.proxyNoRedirect, candidate)
+				}
+				if !ok {
+					mu.Lock()
+					directFailures[host]++
+					mu.Unlock()
+				} else {
+					mu.Lock()
+					directFailures[host] = 0
+					mu.Unlock()
+				}
+			}
 			if ok {
 				results[index] = outcome
 				responded[index] = true
@@ -113,14 +163,14 @@ func (prober *Prober) ProbeAll(ctx context.Context, urls []string) ([]Outcome, [
 	return live, unreachable
 }
 
-func (prober *Prober) probeOne(ctx context.Context, rawURL string) (Outcome, bool) {
+func (prober *Prober) probeOne(ctx context.Context, follow, noRedirect *http.Client, rawURL string) (Outcome, bool) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return Outcome{}, false
 	}
-	client := prober.clientFollow
+	client := follow
 	if !prober.options.FollowRedirects {
-		client = prober.clientNoRedirect
+		client = noRedirect
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
