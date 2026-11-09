@@ -27,7 +27,7 @@
           "description": "相邻搜索请求之间的礼貌间隔毫秒数"
         },
         "proxy-url": {
-          "description": "出站代理地址（http:// 或 socks5://，如 http://engine-proxy:7890）。直连 IP 被必应风控时走代理换出口；留空直连"
+          "description": "出站代理地址(http:// 或 socks5://)。默认指向本部署的引擎出口代理(必应查询、Wayback 存档、代理探测共用);留空=全部直连"
         },
         "use-browser": {
           "description": "在无头浏览器中执行必应查询（翻页需要浏览器会话指纹）。注意：浏览器二进制未随镜像分发时自动回退 HTTP 模式；必应对机房 IP 的翻页有反爬限制，居家/办公出口 IP 更可能生效"

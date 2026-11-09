@@ -70,7 +70,7 @@
           {
             "key": "proxy-url",
             "type": "string",
-            "default": "",
+            "default": "http://172.17.0.1:7890",
             "maxLength": 300
           },
           {

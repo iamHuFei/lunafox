@@ -79,22 +79,44 @@ func FetchWaybackURLs(ctx context.Context, target, proxyURL string, limit, maxAg
 		transport.Proxy = http.ProxyURL(parsed)
 	}
 	client := &http.Client{Timeout: 120 * time.Second, Transport: transport}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build wayback request: %w", err)
+	// The CDX endpoint answers 503 under load fairly often; it is transient,
+	// so retry with backoff instead of failing the whole historical source.
+	var body []byte
+	var lastStatus int
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(time.Duration(attempt) * 5 * time.Second):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, fmt.Errorf("build wayback request: %w", err)
+		}
+		request.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+		response, err := client.Do(request)
+		if err != nil {
+			lastStatus = 0
+			continue
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+		response.Body.Close()
+		if response.StatusCode == http.StatusOK && readErr == nil {
+			body = payload
+			break
+		}
+		lastStatus = response.StatusCode
+		if response.StatusCode != http.StatusServiceUnavailable && response.StatusCode != http.StatusTooManyRequests {
+			return nil, fmt.Errorf("wayback cdx status %d", response.StatusCode)
+		}
 	}
-	request.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("wayback request failed: %w", err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
-	if err != nil {
-		return nil, fmt.Errorf("read wayback response: %w", err)
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wayback cdx status %d", response.StatusCode)
+	if body == nil {
+		if lastStatus == 0 {
+			return nil, fmt.Errorf("wayback request failed after retries")
+		}
+		return nil, fmt.Errorf("wayback cdx status %d after retries", lastStatus)
 	}
 
 	cutoff := ""
